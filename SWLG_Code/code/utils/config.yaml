@@ -1,0 +1,18 @@
+model:
+  n_encoder_layers: 2
+  dim_value: 64
+  n_heads: 4
+  dropout: 0.1
+  train_new_model: False
+  model_name_use: "M1_2enc_5e-05lr_30epoch_5min"
+
+training:
+  lr: 0.00005 
+  n_epochs: 30
+  batch_size: 256
+  electron_range: 24
+  num_workers: 0
+
+data:
+  future_proton_out: 6    # 6 = 30min, 12 = 60min
+  train_split: 0.8
