@@ -1,22 +1,43 @@
-import numpy as np
 import pandas as pd
 
 def Slice_Rising(a_data_df, a_phase_df):
-    rising_indices = np.array([[], []], dtype=np.int32)
+    df = a_data_df.reset_index(drop=True).copy()
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+    ts_index = pd.DatetimeIndex(df["Timestamp"])
 
-    for i, storm in a_phase_df.iterrows():
-        if (storm["Onset Timestamp"] in a_data_df["Timestamp"].values and
-            storm["Peak Timestamp"] in a_data_df["Timestamp"].values):
-            onset_idx = a_data_df["Timestamp"].index[a_data_df["Timestamp"] == storm["Onset Timestamp"]].tolist()[0]
-            peak_idx  = a_data_df["Timestamp"].index[a_data_df["Timestamp"] == storm["Peak Timestamp"]].tolist()[0]
-            rising_index = np.array([[onset_idx], [peak_idx]], dtype=np.int32)
-            rising_indices = np.append(rising_indices, rising_index, axis=1)
+    # use actual min/max, not first/last (data may be unsorted)
+    data_start, data_end = ts_index.min(), ts_index.max()
 
-    rising_flux_df = pd.DataFrame([])
-    for i in range(rising_indices.shape[1]):
-        start, end = rising_indices[0][i], rising_indices[1][i]
-        event_slice = a_data_df.iloc[start:end].copy()
-        event_slice["event_id"] = i          # <-- this is the line that fixes the error
-        rising_flux_df = pd.concat([rising_flux_df, event_slice], ignore_index=True)
+    print(f"SLICE: data range {data_start} to {data_end}", flush=True)
+    print(f"SLICE: phase events = {len(a_phase_df)}, cols = {a_phase_df.columns.tolist()}", flush=True)
 
-    return rising_flux_df
+    rising_frames = []
+    skipped_range = 0
+    skipped_order = 0
+
+    for event_counter, (_, storm) in enumerate(a_phase_df.iterrows()):
+        onset_ts = pd.to_datetime(storm["Onset Timestamp"])
+        peak_ts  = pd.to_datetime(storm["Peak Timestamp"])
+
+        if not (data_start <= onset_ts <= data_end) or not (data_start <= peak_ts <= data_end):
+            skipped_range += 1
+            continue
+
+        onset_pos = ts_index.get_indexer([onset_ts], method="nearest")[0]
+        peak_pos  = ts_index.get_indexer([peak_ts],  method="nearest")[0]
+
+        if peak_pos <= onset_pos:
+            skipped_order += 1
+            continue
+
+        event_slice = df.iloc[onset_pos: peak_pos + 1].copy()
+        event_slice["event_id"] = event_counter
+        rising_frames.append(event_slice)
+
+    print(f"SLICE: matched {len(rising_frames)} events, "
+          f"skipped {skipped_range} (out of range), {skipped_order} (bad order)", flush=True)
+
+    if not rising_frames:
+        return pd.DataFrame(columns=list(df.columns) + ["event_id"])
+
+    return pd.concat(rising_frames, ignore_index=True)

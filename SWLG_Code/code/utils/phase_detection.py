@@ -25,7 +25,8 @@ def Timestamp_Proton_Flux(a_indices, a_df):
 
 
 def Find_Proton_Flux_Phases(a_df, a_range, a_file_name):
-
+    
+    
     a_df = a_df.dropna()
     a_df = a_df.reset_index()
     
@@ -45,6 +46,8 @@ def Find_Proton_Flux_Phases(a_df, a_range, a_file_name):
         minutes       = a_df["Minute"]
         peak_minutes = minutes.iloc[peak_indices]
         peak_timestamp = (peak_dates + pd.to_timedelta(peak_hours, unit="h") + pd.to_timedelta(peak_minutes, unit="m")).reset_index(drop=True)
+
+
 
     else: 
         peak_timestamp = (peak_dates + pd.to_timedelta(peak_hours, unit="h")).reset_index(drop=True)
@@ -119,4 +122,5 @@ def Find_Proton_Flux_Phases(a_df, a_range, a_file_name):
     phases_df = phases_df[phases_df["Onset Flux"] < 2]
     
     phases_df.to_csv("data/phases/" + a_file_name + "-" + str(a_range) + ".csv")
+
     return phases_df

@@ -31,14 +31,19 @@ import pandas as pd
 
 def Power_Law_Spectrum_Flux(a_E1, a_E2, a_p4_flux, a_p4_avg_E, a_p8_flux, a_p8_avg_E):
     """Integrate power law spectrum from E1 to E2 MeV"""
+
+
+    if a_p8_flux >= a_p4_flux:
+        return a_p8_flux * (a_E2 - a_E1)
+
     beta = np.log(a_p8_flux / a_p4_flux) / np.log(a_p8_avg_E / a_p4_avg_E)
     alpha = a_p4_flux / (a_p4_avg_E ** beta)
-    
+
     if beta == -1:
         integral = alpha * np.log(a_E2 / a_E1)
     else:
         integral = alpha * (a_E2**(beta+1) - a_E1**(beta+1)) / (beta + 1)
-    
+
     return integral
 
 def Integrating_Flux(a_df):
@@ -49,6 +54,8 @@ def Integrating_Flux(a_df):
     p8_dE  = 25.0 - 7.8    # 17.2 MeV
     p25_dE = 40.9 - 25.0    # 15.9 MeV
     p41_dE = 53.0 - 40.9    # 12.1 MeV
+
+    a_df = a_df[(a_df["stat_p4"] != -999) & (a_df["stat_p8"]!= -999)]
 
     # Integrate each channel: differential flux × energy width
     a_df["P8_int"]  = a_df["P8"]  * p8_dE
@@ -79,7 +86,13 @@ def Integrating_Flux(a_df):
         a_df["Timestamp"] = pd.to_datetime(a_df["Year"], format="%Y") + \
                             pd.to_timedelta(a_df["DOY"] - 1, unit="D") + \
                             pd.to_timedelta(a_df["Hour"], unit="h")        
-
+    event = a_df[(a_df["Timestamp"] >= "2001-09-24") & (a_df["Timestamp"] <= "2001-09-26")]
+    # print("=== Sept 2001 event components ===")
+    # print(event[["Timestamp", "P4", "P8", "P25", "P41",
+    #              "P8_int", "P25_int", "P41_int", "Px", "P_tot"]].to_string())
+    # print("\nMax P_tot during event:", event["P_tot"].max())
+    # print("Max Px during event:", event["Px"].max())
+    # print("Rows where P8 > P4 (spectrum inverted):", (event["P8"] > event["P4"]).sum(), "of", len(event))
     # Remove error values
 # Remove rows where any channel has fill values (original fill = 1e6 range)
     a_df = a_df[(a_df["P4"] < 1e5) & (a_df["P8"] < 1e5) & (a_df["P25"] < 1e5) & (a_df["P41"] < 1e5)]

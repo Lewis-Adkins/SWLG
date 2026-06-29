@@ -33,17 +33,39 @@ def Get_Rising_Metrics(a_df, a_phase_df, a_future_proton_out):
     a_df = a_df.copy()
     a_df["persistence"] = a_df["original"].shift(a_future_proton_out)
 
-    # Now slice to rising phases (carries the persistence column along)
     rising_df = Slice_Rising(a_df, a_phase_df)
+
+    # --- ALIGNMENT CHECK: does predicted track original within an event? ---
+    for eid in rising_df["event_id"].unique()[:3]:   # first 3 events
+        ev = rising_df[rising_df["event_id"] == eid]
+        print(f"\n--- event {eid} ({len(ev)} rows) ---", flush=True)
+        print(ev[["Timestamp", "original", "predicted"]].to_string(), flush=True)
+    # --- END CHECK ---
+
+    if rising_df.empty:
+        print("WARNING: no rising-phase events found in this data window — returning NaN metrics", flush=True)
+        nan = float("nan")
+        return {k: nan for k in ["mae", "persist_mae", "r2", "mse", "model_lag", "persist_lag", "predictve_efficiency"]}
 
     # Drop only rows where persistence is undefined (start of the whole series)
     valid = rising_df["persistence"].notna()
+
+
+#    # --- DIAGNOSTIC ---
+#     print("=== rising_df after slice ===")
+#     print(rising_df[["Timestamp", "original", "predicted", "persistence"]].head(20).to_string())
+#     print("original range:", rising_df["original"].min(), "to", rising_df["original"].max())
+#     print("predicted range:", rising_df["predicted"].min(), "to", rising_df["predicted"].max())
+#     print("rows:", len(rising_df), "events:", rising_df["event_id"].nunique())
+#     # --- END DIAGNOSTIC ---
+
 
     mae_rising  = sk.metrics.mean_absolute_error(rising_df['original'][valid], rising_df['predicted'][valid])
     mae_persist = sk.metrics.mean_absolute_error(rising_df['original'][valid], rising_df['persistence'][valid])
     r2_rising   = sk.metrics.r2_score(rising_df['original'][valid], rising_df['predicted'][valid])
     mse_rising  = sk.metrics.mean_squared_error(rising_df['original'][valid], rising_df['predicted'][valid])
     predictve_efficiency = 1 - mse_rising/np.var(rising_df['original'][valid])
+    
     metrics = {
         "mae": mae_rising,
         "persist_mae": mae_persist,
@@ -55,5 +77,7 @@ def Get_Rising_Metrics(a_df, a_phase_df, a_future_proton_out):
     }
     df_final_seed_metrics = pd.DataFrame(metrics, index = [0])
 
-    df_final_seed_metrics.to_csv("results/final.csv")
+
+
+    #df_final_seed_metrics.to_csv("results/final.csv")
     return metrics

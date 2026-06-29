@@ -15,6 +15,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import yaml
 import sklearn as sk
 from sklearn.linear_model import LinearRegression
@@ -137,44 +138,62 @@ def load_merged_years(start_year, end_year):
             f"data/enviromental/ephin-soho/merged/merged_{i}.csv"
         )
         df = pd.concat([df, year_df], ignore_index=True)
+
+
+
     return df
 
 
 def prepare_data(cfg):
-    """Load Torres window + validation window, detect phases, log-transform,
-    split, and standardize with training statistics."""
+    """
+    Load the Torres 1997-2002 window, split into train/test by EVENT count
+    (21 train / 18 test, matching Torres) rather than by row-count percentage,
+    log-transform, and standardize with training statistics.
+
+    Torres splits "the first 80% of usable data" and reports 21 events in
+    train and 18 in test. Because our data density differs from theirs, a
+    row-count 80/20 split lands the boundary in 2002 with no strong events in
+    test. Splitting at the date that reproduces the 21/18 event partition
+    matches Torres's event distribution exactly, putting the strong 2001
+    events in the test set as they are for Torres.
+    """
     # --- Torres training/test window 1997-2002 ---
     torres_df = load_merged_years(1997, 2003)
-    torres_merged_phases = Find_Proton_Flux_Phases(
-        torres_df, 50, "torres_merged_phases"
-    )
+    torres_df["Timestamp"] = pd.to_datetime(torres_df["Timestamp"])
 
-    # --- validation window 2010-2014 ---
-    valid_df = load_merged_years(2010, 2015)
-    valid_phases = Find_Proton_Flux_Phases(valid_df, 50, "valid_phases")
+    # --- Torres event catalog (authoritative onset/peak/end) ---
+    torres_merged_phases = pd.read_csv("data/phases/torres_events_converted.csv")
+    for col in ["Onset Timestamp", "Threshold Timestamp", "Peak Timestamp", "End Timestamp"]:
+        if col in torres_merged_phases.columns:
+            torres_merged_phases[col] = pd.to_datetime(torres_merged_phases[col])
 
-    # --- log-transform flux columns ---
+    # --- determine split DATE that yields 21 train / 18 test events ---
+    events_sorted = torres_merged_phases.sort_values("Onset Timestamp").reset_index(drop=True)
+    n_train_events = cfg.get("n_train_events", 21)   # Torres: 21 train, 18 test
+    split_date = events_sorted.iloc[n_train_events]["Onset Timestamp"]
+    print(f"prepare_data: split date = {split_date} "
+          f"({n_train_events} train events / {len(events_sorted) - n_train_events} test events)")
+
+    # --- log-transform flux columns (clip to avoid log(0)) ---
     for col in ["E150", "E300", "P_tot"]:
         torres_df[col] = np.log(np.clip(torres_df[col], 1e-6, None))
-        valid_df[col] = np.log(np.clip(valid_df[col], 1e-6, None))
 
-    torres_df["Timestamp"] = pd.to_datetime(torres_df["Timestamp"])
-    valid_df["Timestamp"] = pd.to_datetime(valid_df["Timestamp"])
+    # --- split by date (events partition), not by row percentage ---
+    train_df = torres_df[torres_df["Timestamp"] < split_date].reset_index(drop=True)
+    test_df  = torres_df[torres_df["Timestamp"] >= split_date].reset_index(drop=True)
+    print(f"prepare_data: train rows {len(train_df)}, test rows {len(test_df)}")
 
-    # --- splits ---
-    split_idx = int(len(torres_df) * cfg["train_split"])
-    split_valid = int(len(valid_df) * 0.3)
-
-    train_df = torres_df.iloc[:split_idx].reset_index(drop=True)
-    test_df = torres_df.iloc[split_idx:].reset_index(drop=True)
-    valid_df = valid_df.iloc[:split_valid].reset_index(drop=True)
+    # --- split the event catalog the same way, so each split evaluates its own events ---
+    train_phases = events_sorted[events_sorted["Onset Timestamp"] < split_date].reset_index(drop=True)
+    test_phases  = events_sorted[events_sorted["Onset Timestamp"] >= split_date].reset_index(drop=True)
+    print(f"prepare_data: train phases {len(train_phases)}, test phases {len(test_phases)}")
 
     # --- standardize ALL splits with TRAINING statistics ---
     e150_mean, e150_std = train_df["E150"].mean(), train_df["E150"].std()
     e300_mean, e300_std = train_df["E300"].mean(), train_df["E300"].std()
     p_tot_mean, p_tot_std = train_df["P_tot"].mean(), train_df["P_tot"].std()
 
-    for df in [train_df, test_df, valid_df]:
+    for df in [train_df, test_df]:
         df["E150"] = (df["E150"] - e150_mean) / e150_std
         df["E300"] = (df["E300"] - e300_mean) / e300_std
         df["P_tot"] = (df["P_tot"] - p_tot_mean) / p_tot_std
@@ -184,12 +203,12 @@ def prepare_data(cfg):
     return {
         "train_df": train_df,
         "test_df": test_df,
-        "valid_df": valid_df,
-        "torres_merged_phases": torres_merged_phases,
-        "valid_phases": valid_phases,
+        "torres_merged_phases": torres_merged_phases,  # full catalog
+        "train_phases": train_phases,                  # events in train window
+        "test_phases": test_phases,                    # events in test window
+        "split_date": split_date,
         "stats": stats,
     }
-
 
 # =====================================================================
 # TRAINING (Torres-style convergence)
@@ -484,6 +503,7 @@ def run_linear_baseline(cfg, data, forecast_out=6):
     lr_aligned_df["predicted"] = y_pred * p_tot_std + p_tot_mean
     lr_aligned_df["original"] = y_test * p_tot_std + p_tot_mean
 
+
     metrics = Get_Rising_Metrics(lr_aligned_df, torres_merged_phases, forecast_out)
     print(f"Linear regression t={forecast_out} rising-phase metrics: {metrics}")
 
@@ -540,7 +560,7 @@ def evaluate_saved_seeds(cfg, data, device, loss_fn):
             m["model_name"] = model_name
             seed_metrics.append(m)
             per_seed_rows.append(m)
-            print(f"t={f} {model_name}: MAE {m['mae']:.4f} | PE {m.get('PE', float('nan')):.4f}")
+            # print(f"t={f} {model_name}: MAE {m['mae']:.4f} | PE {m.get('PE', float('nan')):.4f}")
 
         # aggregate every numeric metric across the seeds for this horizon
         seed_df = pd.DataFrame(seed_metrics)
@@ -562,10 +582,61 @@ def evaluate_saved_seeds(cfg, data, device, loss_fn):
     pd.DataFrame(per_seed_rows).to_csv("results/per_seed_metrics.csv", index=False)
     pd.DataFrame(summary_rows).to_csv("results/final_seed_summary.csv", index=False)
     print("Saved-seed evaluation done.")
+
+def view_torres_phases(data):
+    torres = pd.read_csv("data/phases/torres_events_converted.csv")
+    flux_data = pd.concat([data["train_df"], data["test_df"]], ignore_index=True)
+    flux_data = flux_data.set_index("Timestamp")
+    flux_data.index = pd.to_datetime(flux_data.index)
+
+    state = {"i": 0}
+    n = len(torres)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    def draw(i):
+        ax.clear()
+        row = torres.iloc[i]
+        onset = pd.to_datetime(row["Onset Timestamp"])
+        peak  = pd.to_datetime(row["Peak Timestamp"])
+        end   = pd.to_datetime(row["End Timestamp"])
+
+        idx = flux_data.index.get_indexer([onset, peak, end], method="nearest")
+        start = max(0, idx[0] - 5)
+        stop  = min(len(flux_data), idx[2] + 5)
+
+        y = flux_data["P_tot"].iloc[start:stop]
+        x = np.arange(len(y))
+        ax.plot(x, y.values)
+
+        for label, pos in [("onset", idx[0]), ("peak", idx[1]), ("end", idx[2])]:
+            rel = pos - start
+            if 0 <= rel < len(y):
+                ax.axvline(rel, linestyle="--", alpha=0.5)
+
+        ax.set_title(f"Event {i+1}/{n}: peak={row['Peak Flux']:.1f} pfu @ {peak.date()}"
+                     f"   (← → to navigate)")
+        fig.canvas.draw_idle()
+
+    def on_key(event):
+        if event.key == "right":
+            state["i"] = (state["i"] + 1) % n
+            draw(state["i"])
+        elif event.key == "left":
+            state["i"] = (state["i"] - 1) % n
+            draw(state["i"])
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+    draw(0)
+    plt.show()
+
+
 # =====================================================================
 # MAIN
 # =====================================================================
 def main():
+
+
     cfg = load_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using {device}")
@@ -574,6 +645,9 @@ def main():
     # merge_raw_data()   # uncomment to regenerate merged CSVs (run once)
 
     data = prepare_data(cfg)
+
+    # view_torres_phases(data)
+
 
     if cfg["train_new_models"]:
         model_params_df = run_search(cfg, data, device, loss_fn)
@@ -592,6 +666,7 @@ def main():
 
     all_t_metrics = {}
     for f in cfg["forecasts_out"]:
+        
         all_t_metrics["t=" + str(f)] = run_linear_baseline(cfg, data, forecast_out=f)
 
     # Convert nested dict to a dataframe: one row per horizon, one column per metric
@@ -601,6 +676,7 @@ def main():
 
     baseline_df.to_csv("results/linear_baseline_metrics.csv", index=False)
     print(baseline_df.to_string())
+    
 
 if __name__ == "__main__":
     main()

@@ -78,6 +78,13 @@ def Evaluate_Models(
         test_aligned_df["predicted"] = pred_log
         test_aligned_df["original"]  = orig_log
 
+        print("pred_log range:", pred_log.min(), pred_log.max())
+        print("orig_log range:", orig_log.min(), orig_log.max())
+        print("first 10 pred:", pred_log[:10])
+        print("first 10 orig:", orig_log[:10])
+        print("len predictions:", len(predictions), "len test_df slice:", len(test_aligned_df))
+
+
         # --- rising-phase metrics ---
         rising_results = Get_Rising_Metrics(
             test_aligned_df, torres_merged_phases, row["forecast_out"]
