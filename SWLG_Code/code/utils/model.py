@@ -78,15 +78,7 @@ def Evaluate_Models(
         test_aligned_df["predicted"] = pred_log
         test_aligned_df["original"]  = orig_log
 
-<<<<<<< HEAD
-=======
-        print("pred_log range:", pred_log.min(), pred_log.max())
-        print("orig_log range:", orig_log.min(), orig_log.max())
-        print("first 10 pred:", pred_log[:10])
-        print("first 10 orig:", orig_log[:10])
-        print("len predictions:", len(predictions), "len test_df slice:", len(test_aligned_df))
 
->>>>>>> b140e5d7f3685e2935e0eaca4085869434747d56
 
         # --- rising-phase metrics ---
         rising_results = Get_Rising_Metrics(

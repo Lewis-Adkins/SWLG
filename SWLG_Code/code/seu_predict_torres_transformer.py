@@ -650,7 +650,7 @@ def main():
     print(f"Using {device}")
     loss_fn = nn.MSELoss()
 
-    # merge_raw_data()   # uncomment to regenerate merged CSVs (run once)
+    merge_raw_data()   # uncomment to regenerate merged CSVs (run once)
 
     data = prepare_data(cfg)
 

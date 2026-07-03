@@ -8,11 +8,6 @@ def Slice_Rising(a_data_df, a_phase_df):
     # use actual min/max, not first/last (data may be unsorted)
     data_start, data_end = ts_index.min(), ts_index.max()
 
-<<<<<<< HEAD
-=======
-    print(f"SLICE: data range {data_start} to {data_end}", flush=True)
-    print(f"SLICE: phase events = {len(a_phase_df)}, cols = {a_phase_df.columns.tolist()}", flush=True)
->>>>>>> b140e5d7f3685e2935e0eaca4085869434747d56
 
     rising_frames = []
     skipped_range = 0
@@ -37,12 +32,6 @@ def Slice_Rising(a_data_df, a_phase_df):
         event_slice["event_id"] = event_counter
         rising_frames.append(event_slice)
 
-<<<<<<< HEAD
-
-=======
-    print(f"SLICE: matched {len(rising_frames)} events, "
-          f"skipped {skipped_range} (out of range), {skipped_order} (bad order)", flush=True)
->>>>>>> b140e5d7f3685e2935e0eaca4085869434747d56
 
     if not rising_frames:
         return pd.DataFrame(columns=list(df.columns) + ["event_id"])

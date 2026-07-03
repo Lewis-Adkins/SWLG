@@ -35,15 +35,6 @@ def Get_Rising_Metrics(a_df, a_phase_df, a_future_proton_out):
 
     rising_df = Slice_Rising(a_df, a_phase_df)
 
-<<<<<<< HEAD
-=======
-    # --- ALIGNMENT CHECK: does predicted track original within an event? ---
-    for eid in rising_df["event_id"].unique()[:3]:   # first 3 events
-        ev = rising_df[rising_df["event_id"] == eid]
-        print(f"\n--- event {eid} ({len(ev)} rows) ---", flush=True)
-        print(ev[["Timestamp", "original", "predicted"]].to_string(), flush=True)
-    # --- END CHECK ---
->>>>>>> b140e5d7f3685e2935e0eaca4085869434747d56
 
     if rising_df.empty:
         print("WARNING: no rising-phase events found in this data window — returning NaN metrics", flush=True)
@@ -52,15 +43,6 @@ def Get_Rising_Metrics(a_df, a_phase_df, a_future_proton_out):
 
     # Drop only rows where persistence is undefined (start of the whole series)
     valid = rising_df["persistence"].notna()
-
-
-#    # --- DIAGNOSTIC ---
-#     print("=== rising_df after slice ===")
-#     print(rising_df[["Timestamp", "original", "predicted", "persistence"]].head(20).to_string())
-#     print("original range:", rising_df["original"].min(), "to", rising_df["original"].max())
-#     print("predicted range:", rising_df["predicted"].min(), "to", rising_df["predicted"].max())
-#     print("rows:", len(rising_df), "events:", rising_df["event_id"].nunique())
-#     # --- END DIAGNOSTIC ---
 
 
     mae_rising  = sk.metrics.mean_absolute_error(rising_df['original'][valid], rising_df['predicted'][valid])
