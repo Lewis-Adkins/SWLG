@@ -39,6 +39,9 @@ def Merge_Proton_Electron(proton_path, e150_path, e300_path, output_path,
         proton = pd.read_csv(filepath, sep=r'\s+', comment='#',
                              header=None, names=L3I_COLUMNS)
 
+        proton = proton[(proton["stat_p4"] != -999) & (proton["stat_p8"] != -999)]
+        proton = proton[(proton["P4"] < 1e5) & (proton["P8"] < 1e5) &
+                        (proton["P25"] < 1e5) & (proton["P41"] < 1e5)]
         proton = Integrating_Flux(proton)
         
 

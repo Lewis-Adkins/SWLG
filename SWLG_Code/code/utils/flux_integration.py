@@ -31,31 +31,45 @@ import pandas as pd
 
 def Power_Law_Spectrum_Flux(a_E1, a_E2, a_p4_flux, a_p4_avg_E, a_p8_flux, a_p8_avg_E):
     """Integrate power law spectrum from E1 to E2 MeV"""
+
+
+    if a_p8_flux >= a_p4_flux:
+        return a_p8_flux * (a_E2 - a_E1)
+
     beta = np.log(a_p8_flux / a_p4_flux) / np.log(a_p8_avg_E / a_p4_avg_E)
     alpha = a_p4_flux / (a_p4_avg_E ** beta)
-    
+
     if beta == -1:
         integral = alpha * np.log(a_E2 / a_E1)
     else:
         integral = alpha * (a_E2**(beta+1) - a_E1**(beta+1)) / (beta + 1)
-    
+
     return integral
 
 def Integrating_Flux(a_df):
-    p4_avg_energy = (4.3 + 7.8) / 2   # MeV
-    p8_avg_energy = (7.8 + 25) / 2     # MeV
+    # Geometric mean channel energies (EPHIN doc Table 3 — the calibrated reference)
+    p4_avg_energy = np.sqrt(4.3 * 7.8)    # 5.79 MeV
+    p8_avg_energy = np.sqrt(7.8 * 25.0)   # 13.51 MeV
 
-    # Channel energy widths
-    p8_dE  = 25.0 - 7.8    # 17.2 MeV
+    p8_dE  = 25.0 - 7.8     # 17.2 MeV
     p25_dE = 40.9 - 25.0    # 15.9 MeV
     p41_dE = 53.0 - 40.9    # 12.1 MeV
 
-    # Integrate each channel: differential flux × energy width
+    a_df = a_df.copy()
+
+    # mask zero-count / fill channels BEFORE integration
+    for stat_col, chan in [("stat_p4","P4"),("stat_p8","P8"),
+                           ("stat_p25","P25"),("stat_p41","P41")]:
+        if stat_col in a_df.columns:
+            a_df.loc[a_df[stat_col] == -999, chan] = np.nan
+    for chan in ["P4","P8","P25","P41"]:
+        a_df.loc[a_df[chan] < 0, chan] = np.nan
+        a_df.loc[a_df[chan] > 1e5, chan] = np.nan
+
     a_df["P8_int"]  = a_df["P8"]  * p8_dE
     a_df["P25_int"] = a_df["P25"] * p25_dE
     a_df["P41_int"] = a_df["P41"] * p41_dE
 
-    # Subtract 7.8-10 MeV portion using power law interpolation
     a_df["Px"] = a_df.apply(
         lambda row: Power_Law_Spectrum_Flux(
             7.8, 10.0,
@@ -65,33 +79,24 @@ def Integrating_Flux(a_df):
         axis=1
     )
 
-    # Total >10 MeV integral flux
     a_df["P_tot"] = a_df["P8_int"] + a_df["P25_int"] + a_df["P41_int"] - a_df["Px"]
 
-
     if "Minute" in a_df.columns:
-        
         a_df["Timestamp"] = pd.to_datetime(a_df["Year"], format="%Y") + \
-                            pd.to_timedelta(a_df["DOY"] - 1, unit="D") + \
-                            pd.to_timedelta(a_df["Hour"], unit="h") +\
-                            pd.to_timedelta(a_df["Minute"], unit = "m")
+            pd.to_timedelta(a_df["DOY"] - 1, unit="D") + \
+            pd.to_timedelta(a_df["Hour"], unit="h") + \
+            pd.to_timedelta(a_df["Minute"], unit="m")
     else:
         a_df["Timestamp"] = pd.to_datetime(a_df["Year"], format="%Y") + \
-                            pd.to_timedelta(a_df["DOY"] - 1, unit="D") + \
-                            pd.to_timedelta(a_df["Hour"], unit="h")        
+            pd.to_timedelta(a_df["DOY"] - 1, unit="D") + \
+            pd.to_timedelta(a_df["Hour"], unit="h")
 
-    # Remove error values
-# Remove rows where any channel has fill values (original fill = 1e6 range)
-    a_df = a_df[(a_df["P4"] < 1e5) & (a_df["P8"] < 1e5) & (a_df["P25"] < 1e5) & (a_df["P41"] < 1e5)]
-
-    # Remove negative P_tot values
     a_df = a_df[a_df["P_tot"] >= 0]
-
     return a_df
 
 def Integrating_Flux_l3i(a_df):
-    p4_avg_energy = (4.3 + 7.8) / 2   # MeV
-    p8_avg_energy = (7.8 + 25) / 2     # MeV
+    p4_avg_energy = 5.79  # MeV
+    p8_avg_energy =  13.51     # MeV
 
 
     # Subtract 7.8-10 MeV portion using power law interpolation

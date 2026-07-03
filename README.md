@@ -1,89 +1,63 @@
-# SWLG_Code Summary
+# Forcasting Solar Energetic Particles Fluxes Using Transformer and Comparing to Previous Methods
 
-## Code
+## Intro
+Predicting Solar Energetic Particle (SEP) fluxes is critical in the protection of operating satellites.  [Posner 2007](https://doi.org/10.1029/2006SW000268) first attempted to demonstrate short term  1 hour forecasting on the Comprehensive Suprathermal and Energetic Particle Analyzer (COSTEP) on SOHO  using relativistic electrons travelling 1 AU ahead of nonrelativistc Solar Proton Events (SPE) using a $13 \times 18$ forecasting matrix that maps electron intensity and a calculated electron increase parameter. Continued efforts using advanced methods such as machine learning algorithms more accurately forecasted these storms. [Torres 2025](https://doi.org/10.1029/2024SW003921) uses Neural Networks (NN) and Recurrnet Neural Networks (RNN) to develope an early warning system using COSTEP data. This repo will attempt to reproduce Torres's M1 models with a transformer encoding only achtiecture using results from both papers as a baseline. Can a transformer achtiecture outperform these models 30 mins to 1 hour while providing accurate forecasting up to 2 hours? 
 
-**Location**: SWLG_Code/code
+```seu_predict_torres_transformer.py``` performs a hyperparamterization search to find the most efficient model in forecasting. Torres RNN and NN uses two layers: a hidden layer with 30 units and a dense output layer of one unit. Because of the smaller sizes we will be training our transfomer on smaller parameters.
 
-seu_geo_temporal.ipynb - marks the geolocation and temporal occurences of SEUs <br>
-seu_predict_ml.ipynb - characterizes proton flux data to be fred into machine learning model.
+# Data Acquistion
 
+Torres uses a the 5 min averaged data for their forecasting. you can download it  [here](https://soho.nascom.nasa.gov/data/archive.html), afterwards you want to extract it in the `SWLG_Code/code/data/enviromental/ephin-soho/5min_proton_1997-2025` folder (need to clean data folder)
 
+# Config
 
+```
+file:
+  find_best_model: True
+  model_name_use: ""
+model:
+  n_encoder_layers: 2
+  dim_values: [32]
+  n_heads: 4
+  dropout: 0.1
+  train_new_model: False
+  seed_experiment: False
 
-## Data Files 
-**Location:** SWLG_Code/code/data
+training:
+  learning_rates: [0.0005]  
+  n_epochs: [1000]
+  batch_sizes: [32]
+  electron_range: 24
+  num_workers: 4
 
-### SEU - Timestamps and Geolocation
+data:
+  forecasts_out: [6,12]    # 6 = 30min, 12 = 60min
+  train_split: 0.8
+```
 
-**Location**: SWLG_Code/code/data/seu_timestamp 
+## Configuration Reference
 
-#### TDRS-5 Satellite
+### file
+- **find_best_model** — Whether to run model selection across the search results (trivial here since there's one candidate per horizon).
+- **model_name_use** — A specific model filename to load by name; empty means none.
 
-**Description:** NCEI created the satellite anomalies database from external data in an effort to more clearly understand and document how space weather events affected satellites. <br>
-Connecting individual anomalies to space weather events is a complex task that typically requires collaboration between satellite operators, engineers, and space weather subject matter experts. The information <br>produced in that discourse can be difficult to obtain.<br>
+### model
+- **n_encoder_layers** — Number of stacked transformer encoder layers, set to 2 to match Torres's small scale.
+- **dim_values** — The embedding dimension each timestep is projected into before attention, kept small at 32.
+- **n_heads** — Number of parallel attention heads (8 dimensions each), letting the model attend to multiple patterns at once.
+- **dropout** — Fraction of neurons randomly zeroed during training to limit overfitting, set mild at 0.1.
+- **train_new_model** — Whether to train fresh models or skip the search and load prior results; False skips it.
+- **seed_experiment** — Whether to retrain the five seeds or evaluate already-saved ones; False evaluates existing models.
 
-**Data:** [tdrs5j](https://www.ngdc.noaa.gov/stp/satellite/anomaly/doc/)  <- is actully only a tdrs 1 timstamp of SEU<br>
+### training
+- **learning_rates** — Adam's weight-update step size, set to a stable 0.0005.
+- **n_epochs** — Maximum training epochs (1000 ceiling), with convergence stopping earlier when loss plateaus.
+- **batch_sizes** — Number of windows per gradient update, set to 32 to match Torres-scale training.
+- **electron_range** — Input window length in timesteps (24 = 2 hours), matching Torres's electron history window.
+- **num_workers** — Parallel CPU processes feeding the GPU, set to 4 for faster data loading.
 
-**Paper:** [[Lohmeyer 2018]]<br>
-
-TDRS-5 Satellite
-
-#### TDRS-1 Satellite 
-
-**Description:** NCEI created the satellite anomalies database from external data in an effort to more clearly understand and document how space weather events affected satellites. 
-Connecting individual anomalies to space weather events is a complex task that typically requires collaboration between satellite operators, engineers, and space weather subject matter experts. The information produced in that discourse can be difficult to obtain.
-
-**Data:** [TDRS-1 SEU table](https://www.ncei.noaa.gov/products/satellite-anomalies) <- anom5j database for a bnunch of satellites with minimal SEU data<br>
-
-**Paper:** [[Lohmeyer 2013]]<br>
-
-#### GOES-16 Satellite
-
-**Description:** NCEI created the satellite anomalies database from external data in an effort to more clearly understand and document how space weather events affected satellites. 
-Connecting individual anomalies to space weather events is a complex task that typically requires collaboration between satellite operators, engineers, and space weather subject matter experts. The information produced in that discourse can be difficult to obtain.
-
-**Data:** [GOES-16 and GOES-17 EXIS Space Wire anomalies](https://www.ncei.noaa.gov/products/satellite-anomalies) 
-
-**Paper:** [[Lohmeyer 2018]]
-
-#### GOES-17 Satellite
-
-**Description:** NCEI created the satellite anomalies database from external data in an effort to more clearly understand and document how space weather events affected satellites. 
-Connecting individual anomalies to space weather events is a complex task that typically requires collaboration between satellite operators, engineers, and space weather subject matter experts. The information produced in that discourse can be difficult to obtain.
-
-**Data:** [GOES-16 and GOES-17 EXIS Space Wire anomalies](https://www.ncei.noaa.gov/products/satellite-anomalies) 
-
-**Paper:** [[Lohmeyer 2018]]
-#### Flying Laptop Satellite
-
-**Description**: Single Event Upset Data with Position Data used in "Single Event Upsets in flight observation and analysis for the “Flying Laptop” small satellite". Data measured by the FLP UT-699 Onboard Computer. (2019-06-27)
-
-**Data:** [Flying Laptop SEU Data](https://darus.uni-stuttgart.de/dataset.xhtml?persistentId=doi:10.18419/darus-443) 
-
-**Paper:** [[Noeldeke 2021]]
-
-### Space Enviromental Data
-
-**Location: ** SWLG_Code/code/data/enviromental
-
-#### SOHO/EPHIN - Proton
-Description: Interface to produce plots, listings or output files from SOHO Proton and Helium Instrument (EPHIN, level3), hour averages
-
-Data:  https://omniweb.gsfc.nasa.gov/ftpbrowser/soho_ephin_flux_hr.html
-Paper: [[Torres 2025]]
-
-# Telemetry Data
-
-## Jason-3
-**Description:** These data consist of raw Level-0 telemetry data from the Jason-3 spacecraft. There are three datatypes available: Housekeeping Telemetry - Recorded (HKTM-R) is stored on the spacecraft for later downlink; Payload Telemetry 1 (PLTM-1) is the payload science data from the core-mission payloads: Poseidon, DORIS, AMR, and GPSP; and Payload Telemetry 2 (PLTM-2) is the payload science data from the passenger mission of opportunity payloads. They are available as CCSDS packet files.
-**Data**: [NCEI](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:Jason3-Telemetry)
-**Paper**: N/A - Just found google searching
-
-## Deep Space Climate Observatory (DSCOVR)
-**Description:** The Deep Space Climate Observatory (DSCOVR) is a [solar wind](https://en.wikipedia.org/wiki/Solar_wind "(opens in a new window)") monitoring system that provides early warnings before a Coronal Mass Ejection (CME) or shockwave strikes our planet. DSCOVR data supports forecasts and research that allow power grid and satellite operators time to protect critical infrastructure from [damage or disruption](http://www.swpc.noaa.gov/impacts).
-**Data**: [NCEI]([https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.nodc:Jason3-Telemetry](https://www.ncei.noaa.gov/products/deep-space-climate-observatory-dscovr))
-**Paper**: N/A - Just found google searching
-
-
+### data
+- **forecasts_out** — Forecast horizons in timesteps: 6 (30 min) and 12 (60 min).
+- **train_split** — Fraction used for training versus testing, 0.8 for a chronological 80/20 split.
 
 
