@@ -147,77 +147,49 @@ def load_merged_years(start_year, end_year):
 
 def prepare_data(cfg):
     """
-    Load the Torres 1997-2002 window, split into train/test by EVENT count
-    (21 train / 18 test, matching Torres) rather than by row-count percentage,
-    log-transform, and standardize with training statistics.
+    Load Torres's published data.csv (already-transformed electron & proton
+    intensities plus per-row phase flags) and split chronologically 80/20,
+    exactly as Torres does: "the first 80% of usable data is for training and
+    the last 20% is for testing."
 
-    Torres splits "the first 80% of usable data" and reports 21 events in
-    train and 18 in test. Because our data density differs from theirs, a
-    row-count 80/20 split lands the boundary in 2002 with no strong events in
-    test. Splitting at the date that reproduces the 21/18 event partition
-    matches Torres's event distribution exactly, putting the strong 2001
-    events in the test set as they are for Torres.
+    data.csv columns are ALREADY TRANSFORMED (values negative -> log space).
+    Do NOT log-transform again.
+        time, electron(>0.25MeV -> E150), electron_high(>0.67MeV -> E300),
+        proton(>10MeV -> P_tot), d_*/max_d_* (unused),
+        background/rising/falling (per-row phase flags 0/1)
     """
-
     df = pd.read_csv("data/data.csv")
-    print(df.head())
-    print(df.dtypes)
-    print("time sample:", df["time"].iloc[0], "|", df["time"].iloc[-1])
-    print("proton range:", df["proton"].min(), "to", df["proton"].max())
-    print("electron range:", df["electron"].min(), "to", df["electron"].max())
-    print("electron_high range:", df["electron_high"].min(), "to", df["electron_high"].max())
-    print("rising sum:", df["rising"].sum(), "of", len(df))
-    print("phase cols unique:", df["background"].unique(), df["rising"].unique(), df["falling"].unique())
-    # --- Torres training/test window 1997-2002 ---
-    torres_df = load_merged_years(1997, 2003)
-    torres_df["Timestamp"] = pd.to_datetime(torres_df["Timestamp"])
+    df["time"] = pd.to_datetime(df["time"])
+    df = df.sort_values("time").reset_index(drop=True)
 
-    # --- Torres event catalog (authoritative onset/peak/end) ---
-    torres_merged_phases = pd.read_csv("data/phases/torres_events_converted.csv")
-    for col in ["Onset Timestamp", "Threshold Timestamp", "Peak Timestamp", "End Timestamp"]:
-        if col in torres_merged_phases.columns:
-            torres_merged_phases[col] = pd.to_datetime(torres_merged_phases[col])
+    df = df.rename(columns={
+        "electron":      "E150",
+        "electron_high": "E300",
+        "proton":        "P_tot",
+    })
 
-    # --- determine split DATE that yields 21 train / 18 test events ---
-    events_sorted = torres_merged_phases.sort_values("Onset Timestamp").reset_index(drop=True)
-    n_train_events = cfg.get("n_train_events", 21)   # Torres: 21 train, 18 test
-    split_date = events_sorted.iloc[n_train_events]["Onset Timestamp"]
-    print(f"prepare_data: split date = {split_date} "
-          f"({n_train_events} train events / {len(events_sorted) - n_train_events} test events)")
+    # --- straight 80/20 chronological split on the rows (Torres's method) ---
+    split_idx = int(len(df) * cfg.get("train_split", 0.8))
+    train_df = df.iloc[:split_idx].reset_index(drop=True)
+    test_df  = df.iloc[split_idx:].reset_index(drop=True)
+    print(f"prepare_data: split at row {split_idx}/{len(df)} "
+          f"({train_df['time'].iloc[-1]} | test starts {test_df['time'].iloc[0]})")
 
-    # --- log-transform flux columns (clip to avoid log(0)) ---
-    for col in ["E150", "E300", "P_tot"]:
-        torres_df[col] = np.log(np.clip(torres_df[col], 1e-6, None))
-
-    # --- split by date (events partition), not by row percentage ---
-    train_df = torres_df[torres_df["Timestamp"] < split_date].reset_index(drop=True)
-    test_df  = torres_df[torres_df["Timestamp"] >= split_date].reset_index(drop=True)
-    print(f"prepare_data: train rows {len(train_df)}, test rows {len(test_df)}")
-
-    # --- split the event catalog the same way, so each split evaluates its own events ---
-    train_phases = events_sorted[events_sorted["Onset Timestamp"] < split_date].reset_index(drop=True)
-    test_phases  = events_sorted[events_sorted["Onset Timestamp"] >= split_date].reset_index(drop=True)
-    print(f"prepare_data: train phases {len(train_phases)}, test phases {len(test_phases)}")
-
-    # --- standardize ALL splits with TRAINING statistics ---
+    # --- standardize with TRAINING stats (data already log-space; do NOT re-log) ---
     e150_mean, e150_std = train_df["E150"].mean(), train_df["E150"].std()
     e300_mean, e300_std = train_df["E300"].mean(), train_df["E300"].std()
     p_tot_mean, p_tot_std = train_df["P_tot"].mean(), train_df["P_tot"].std()
 
-    for df in [train_df, test_df]:
-        df["E150"] = (df["E150"] - e150_mean) / e150_std
-        df["E300"] = (df["E300"] - e300_mean) / e300_std
-        df["P_tot"] = (df["P_tot"] - p_tot_mean) / p_tot_std
+    for d in (train_df, test_df):
+        d["E150"]  = (d["E150"]  - e150_mean)  / e150_std
+        d["E300"]  = (d["E300"]  - e300_mean)  / e300_std
+        d["P_tot"] = (d["P_tot"] - p_tot_mean) / p_tot_std
 
     stats = {"p_tot_mean": p_tot_mean, "p_tot_std": p_tot_std}
 
     return {
         "train_df": train_df,
         "test_df": test_df,
-        "torres_merged_phases": torres_merged_phases,  # full catalog
-        "train_phases": train_phases,                  # events in train window
-        "test_phases": test_phases,                    # events in test window
-        "split_date": split_date,
         "stats": stats,
     }
 
@@ -650,10 +622,10 @@ def main():
     print(f"Using {device}")
     loss_fn = nn.MSELoss()
 
-    merge_raw_data()   # uncomment to regenerate merged CSVs (run once)
+    # merge_raw_data()   # uncomment to regenerate merged CSVs (run once)
 
     data = prepare_data(cfg)
-
+    print(data)
     # view_torres_phases(data)
 
 

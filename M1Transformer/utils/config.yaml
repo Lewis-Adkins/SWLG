@@ -1,0 +1,18 @@
+model:
+  n_encoder_layers: 1      # <-- 1 if matching GRU scale
+  dim_val: 16              # <-- 16 if matching GRU scale
+  n_heads: 2               # <-- 2 if dim_val=16
+  dropout: 0.1
+  window_size: 25          # <-- FIXED: was 24, must match your 25-step window
+
+training:
+  learning_rate: 0.0005
+  n_epochs: 1000
+  batch_size: 32
+  num_workers: 4
+  patience: 20             # Torres: early stop, min_delta 1e-4, patience 20
+  min_delta: 0.0001
+
+data:
+  prediction_time: [6, 12]   # 6 = 30min, 12 = 60min
+  train_split: 0.8
