@@ -6,6 +6,7 @@ model:
   window_size: 25          # <-- FIXED: was 24, must match your 25-step window
 
 training:
+  train_new_models : False
   learning_rate: 0.0005
   n_epochs: 1000
   batch_size: 32
@@ -14,5 +15,5 @@ training:
   min_delta: 0.0001
 
 data:
-  prediction_time: [6, 12]   # 6 = 30min, 12 = 60min
+  prediction_time: [6]   # 6 = 30min, 12 = 60min
   train_split: 0.8

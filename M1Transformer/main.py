@@ -73,32 +73,30 @@ def train_model(model, train_loader, optimizer, loss_fn, device,
     return model, best_loss
 
 def test_model(model, test_loader, device, loss_fn):
-     model.eval()
+    model.eval()
+    
+    predictions = tc.tensor([]).to(device)
+    # original    = tc.tensor([]).to(device)
+    # losses      = tc.tensor([]).to(device)
+    # test_loss   = 0.0
 
-     predictions = tc.tensor([]).to(device)
-     original    = tc.tensor([]).to(device)
-     losses      = tc.tensor([]).to(device)
-     test_loss   = 0.0
-
-     with torch.no_grad():
-          for batch in test_loader:
-               x = batch["Current_Flux_Data"].to(device)
-               y = batch["Target_Proton_data"].to(device)
-               pred = model.squeeze()
-               predictions = tc.cat((predictions, pred.flatten))
-
-               loss = loss_fn(y,pred)
-               loss = tc.cat((losses, loss.flatten()))
-               test_loss += loss.item()
-
-     return predictions
-
+    with torch.no_grad():
+        for batch in test_loader:
+            x = batch["Current_Flux_Data"].to(device)
+            # y = batch["Target_Proton_Data"].to(device)
+            pred = model(x).squeeze()
+            predictions = tc.cat((predictions, pred.flatten()))
+            # loss = loss_fn(y,pred)
+            # loss = tc.cat((losses, loss.flatten()))
+            # test_loss += loss.item()
+    return predictions
 
 def load_config(path="utils/config.yaml"):
     with open(path) as f:
         config = yaml.safe_load(f)
 
     cfg = {
+        
         "n_encoder_layers": config["model"]["n_encoder_layers"],
         "dim_val":       config["model"]["dim_val"],
         "n_heads":          config["model"]["n_heads"],
@@ -109,6 +107,7 @@ def load_config(path="utils/config.yaml"):
         "n_epochs":         config["training"]["n_epochs"],
         "batch_size":      config["training"]["batch_size"],
         "num_workers":      config["training"]["num_workers"],
+        "train_new_models": config["training"]["train_new_models"],
 
         "prediction_time":    config["data"]["prediction_time"],
         "train_split":      config["data"]["train_split"],
@@ -122,12 +121,14 @@ def set_up_model_train_test(data, cfg, prediction_time):
     train, targets_train, test, targets_test = pair_input_output(data, False, prediction_time)
 
     train = np.array([instance.T for instance in train])
+
     train_dataset = M1Dataset(train, targets_train)
-    train_loader  = DataLoader(train_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"], pin_memory= True, persistent_workers= True)   
+    train_loader  = DataLoader(train_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"], pin_memory= True, persistent_workers= True, shuffle=False)   
 
     test = np.array([instance.T for instance in test]) 
+    targets_test = np.array(list(targets_test.values()))
     test_dataset = M1Dataset(test, targets_test)
-    test_loader = DataLoader(test_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"],pin_memory=True, persistent_workers=True)
+    test_loader = DataLoader(test_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"],pin_memory=True, persistent_workers=True, shuffle=False)
 
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
@@ -141,46 +142,44 @@ def main():
     
     cfg = load_config()
 
-
-    
-    predictions = []
     for pt in cfg["prediction_time"]:
             optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
-
-            for seed in range(5):
-                
-                torch.manual_seed(seed)
+            for seed in range(1):
                 model_name = "M1-" + str(seed).zfill(2)
-
-                model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)                
-                torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
-                
-                pred  = test_model(model, test_loader, device, loss_fn)
-                predictions.append(pred)  
-
-
+                if cfg["train_new_models"]:                
+                    torch.manual_seed(seed)                   
+                    model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)                
+                    torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")                  
+                model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))   
+                predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
+       
+    
 ### FROM TORRES MAIN FUNCTION ###
     # Load events for evaluation
 
-    for pred in predictions:
-         for pt in cfg["prediction_time"]:
-            _,_,_, targets_test = pair_input_output(data, False, pt)
-            event_file = open('../data/event_timestamps.txt', 'r')
-            lines = event_file.readlines()
-            event_times = [line.split() for line in lines]
-            event_file.close()
 
-            # Select only events which are in the test set
-            event_times_test = []
-            first_test_event_time = list(targets_test.keys())[0]
-            for event in event_times:
-                if event[0] >= first_test_event_time:
-                    event_times_test.append(event)
+    for pt in cfg["prediction_time"]:
+        _,_,_, targets_test = pair_input_output(data, False, pt)
+        event_file = open('data/event_timestamps.txt', 'r')
+        lines = event_file.readlines()
+        event_times = [line.split() for line in lines]
+        event_file.close()
+
+        # Select only events which are in the test set
+        event_times_test = []
+        first_test_event_time = list(targets_test.keys())[0]
+        for event in event_times:
+            if event[0] >= first_test_event_time:
+                event_times_test.append(event)
+
+        # Evaluate predictions
+        target_times = list(targets_test.keys())
+        predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
 
 
-            target_times = list(targets_test.keys())
-            predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
-            evaluate(targets_test, predictions, event_times_test, data, "results", False)
+
+        evaluate(targets_test, predictions, event_times_test, data, path = "results/", display= True)
+
 ### END ###
 if __name__ == "__main__":
         main()

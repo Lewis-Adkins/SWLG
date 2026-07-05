@@ -2,12 +2,15 @@
 # from keras.layers import Dense, GRU
 # from keras.models import load_model, Sequential
 # from load_data import *
-# from torres import mae, x_axis_error, lag_ln10
+from torres.stats import mae, x_axis_error, lag_ln10
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# from stats import mae
+# from stats import lag_ln10
+# from stats import x_axis_error
 
 def slice_dictionary_keys(dictionary, start, end):
     """
