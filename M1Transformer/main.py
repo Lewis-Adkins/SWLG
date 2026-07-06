@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import argparse
@@ -17,6 +18,7 @@ import torch as tc
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 
+from linear.linear_regression import run_linear_baseline
         
 def train_model(model, train_loader, optimizer, loss_fn, device,
                 n_epoch=1000, patience=20, min_delta=1e-4, tag=""):
@@ -108,14 +110,26 @@ def load_config(path="utils/config.yaml"):
         "batch_size":      config["training"]["batch_size"],
         "num_workers":      config["training"]["num_workers"],
         "train_new_models": config["training"]["train_new_models"],
+        "n_seeds":          config["training"]["n_seeds"],
 
         "prediction_time":    config["data"]["prediction_time"],
         "train_split":      config["data"]["train_split"],
     }
     return cfg
 
+def create_result_dirs(cfg):
+    """Create results/linear/t={pt} and results/transformer/t={pt}/{model_name}
+    (one per seed) for every prediction_time in cfg, so evaluate() has
+    somewhere to write before it's called."""
+    for pt in cfg["prediction_time"]:
+        os.makedirs(f"results/linear/t={pt}", exist_ok=True)
+        for seed in range(cfg["n_seeds"]):
+            model_name = "M1-" + str(seed).zfill(2)
+            os.makedirs(f"results/transformer/t={pt}/{model_name}", exist_ok=True)
+
+
 def set_up_model_train_test(data, cfg, prediction_time):
- 
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = M1Transformer(input_size = 3,dim_val = cfg["dim_val"], window_size= cfg["window_size"]).to(device)
     train, targets_train, test, targets_test = pair_input_output(data, False, prediction_time)
@@ -123,9 +137,9 @@ def set_up_model_train_test(data, cfg, prediction_time):
     train = np.array([instance.T for instance in train])
 
     train_dataset = M1Dataset(train, targets_train)
-    train_loader  = DataLoader(train_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"], pin_memory= True, persistent_workers= True, shuffle=False)   
+    train_loader  = DataLoader(train_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"], pin_memory= True, persistent_workers= True, shuffle=True)
 
-    test = np.array([instance.T for instance in test]) 
+    test = np.array([instance.T for instance in test])
     targets_test = np.array(list(targets_test.values()))
     test_dataset = M1Dataset(test, targets_test)
     test_loader = DataLoader(test_dataset, batch_size= cfg["batch_size"], num_workers= cfg["num_workers"],pin_memory=True, persistent_workers=True, shuffle=False)
@@ -136,50 +150,54 @@ def set_up_model_train_test(data, cfg, prediction_time):
     return optimizer, model,  train_loader, test_loader, device, loss_fn
 
 
+
+
 def main():
     # Pair inputs and outputs, and split into train/test
     data = pd.read_csv('data/data.csv')
     
     cfg = load_config()
+    create_result_dirs(cfg)
 
-    for pt in cfg["prediction_time"]:
-            optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
-            for seed in range(1):
-                model_name = "M1-" + str(seed).zfill(2)
-                if cfg["train_new_models"]:                
-                    torch.manual_seed(seed)                   
-                    model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)                
-                    torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")                  
-                model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))   
-                predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
-       
-    
-### FROM TORRES MAIN FUNCTION ###
-    # Load events for evaluation
-
-
-    for pt in cfg["prediction_time"]:
-        _,_,_, targets_test = pair_input_output(data, False, pt)
-        event_file = open('data/event_timestamps.txt', 'r')
+    with open('data/event_timestamps.txt', 'r') as event_file:
         lines = event_file.readlines()
-        event_times = [line.split() for line in lines]
-        event_file.close()
-
-        # Select only events which are in the test set
-        event_times_test = []
-        first_test_event_time = list(targets_test.keys())[0]
-        for event in event_times:
-            if event[0] >= first_test_event_time:
-                event_times_test.append(event)
-
-        # Evaluate predictions
-        target_times = list(targets_test.keys())
-        predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+    event_times = [line.split() for line in lines]
 
 
+    ### TRAINING ###
+    for pt in cfg["prediction_time"]:
+            print(f"======== Evaluating Lin Regress, t={pt}  ========")
+            run_linear_baseline(data, pt)
+            optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
+            for seed in range(cfg["n_seeds"]):
+                model_name = "M1-" + str(seed).zfill(2)
+                if cfg["train_new_models"]:
+                    torch.manual_seed(seed)
+                    model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
+                    torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
 
-        evaluate(targets_test, predictions, event_times_test, data, path = "results/", display= True)
+                ### TESTING ###
+                model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))
+                predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
 
+### FROM TORRES MAIN FUNCTION - EVALUATION ###
+
+                _,_,_, targets_test = pair_input_output(data, False, pt)
+
+                # Select only events which are in the test set
+                event_times_test = []
+                first_test_event_time = list(targets_test.keys())[0]
+                for event in event_times:
+                    if event[0] >= first_test_event_time:
+                        event_times_test.append(event) 
+
+                # Evaluate predictions
+                target_times = list(targets_test.keys())
+                predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+
+                print(f"======== Evaluating {model_name}, t={6} ========")
+                evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t={pt}/{model_name}", display= False)
+                
 ### END ###
 if __name__ == "__main__":
         main()

@@ -20,9 +20,9 @@ class M1Transformer(nn.Module):
         self.output_layer = nn.Linear(dim_val, 1)
 
     def forward(self, x):
-        x = self.input_layer(x)
-        x = x + self.pos_encoding
-        x = self.encoder(x)
-        x = x[:, -1, :]
-        x = self.output_layer(x)
+        x = self.input_layer(x)      # (batch, 25, 3) -> (batch, 25, dim_val): project raw features up
+        x = x + self.pos_encoding    # <-- THIS is where positional info gets injected
+        x = self.encoder(x)          # the encoder stack: attention + feedforward, repeated n_encoder_layers times
+        x = x[:, -1, :]               # take the last position's output vector
+        x = self.output_layer(x)     # project down to a single scalar
         return x
