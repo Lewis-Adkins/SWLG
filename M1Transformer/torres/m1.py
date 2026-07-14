@@ -2,7 +2,7 @@
 # from keras.layers import Dense, GRU
 # from keras.models import load_model, Sequential
 # from load_data import *
-from torres.stats import mae, x_axis_error, lag_ln10
+from torres.stats import mae, x_axis_error, pe, lag_ln10
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
@@ -121,6 +121,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
     o2p_lags = []
     o2t_lags = []
     ln10_lags = []
+    pes = []
     for i, event in enumerate(event_times):
 
         # Get event times
@@ -184,6 +185,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
 
         # Calculate stats
         maes.append(mae(targets_o2p, predictions_o2p, False))
+        pes.append(pe(targets_o2p, predictions_o2p))
         o2p_lags.append(x_axis_error(targets_o2p, predictions_o2p, False))
         o2t_lags.append(x_axis_error(targets_o2t, predictions_o2t, False))
         ln10_lags.append(lag_ln10(targets_o2p, predictions_o2p))
@@ -195,6 +197,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
             outfile.write(f"Event {i + 1}\nMAE = {maes[i]: 0.3f}\nO2P lag = {o2p_lags[i]: 0.3f}\n"
                           f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\n\n")
         outfile.write(f"Average MAE = {np.average(maes): 0.3f}\n")
+        outfile.write(f"Average PE = {np.average(pes): 0.3f}\n")
         outfile.write(f"Average O2P lag = {np.average(o2p_lags): 0.3f}\n")
         outfile.write(f"Average O2T lag = {np.average(o2t_lags): 0.3f}\n")
         outfile.write(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}\n")
@@ -202,6 +205,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
 
     # Output average metrics to standard output
     print(f"Average MAE = {np.average(maes): 0.3f}")
+    print(f"Average PE = {np.average(pes): 0.3f}")
     print(f"Average O2P lag = {np.average(o2p_lags): 0.3f}")
     print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
     print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")

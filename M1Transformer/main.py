@@ -123,9 +123,59 @@ def create_result_dirs(cfg):
     somewhere to write before it's called."""
     for pt in cfg["prediction_time"]:
         os.makedirs(f"results/linear/t={pt}", exist_ok=True)
+        os.makedirs(f"models/t={pt}", exist_ok=True)
         for seed in range(cfg["n_seeds"]):
             model_name = "M1-" + str(seed).zfill(2)
             os.makedirs(f"results/transformer/t={pt}/{model_name}", exist_ok=True)
+
+def create_result_csv(cfg):
+    results = {}
+    final_results = {}
+    for pt in cfg["prediction_time"]:
+        
+        metrics = {"Average MAE":[],
+                   "Average PE": [],
+                   "Average O2P lag":[],
+                   "Average O2T lag":[],
+                   "Average ln10 lag":[],
+                    }
+        for seed in range(cfg["n_seeds"]):
+            model_name = model_name = "M1-" + str(seed).zfill(2)
+
+            with open(f"results/transformer/t={pt}/{model_name}/results.txt") as file:
+                
+                for line in file:
+                    for m in list(metrics):
+                        if line.startswith(m):
+                            metrics[m].append(float(line.split("=")[1].replace(" ", "")))
+
+        results[f"t={pt}"] = metrics
+        
+    results_df = pd.DataFrame([])
+    
+
+    for  pt in cfg["prediction_time"]:
+
+        data = {}
+        for m in list(metrics):
+            mean = np.mean(results[f"t={pt}"][m]).round(3)
+            std =  np.std(results[f"t={pt}"][m]).round(3)
+            results[f"t={pt}"]["RAVG-" + m] = mean
+            results[f"t={pt}"]["RSTD-" + m] = std
+
+            data["t="] =  pt
+            data[m] = mean
+            data["std " + m] = std 
+
+
+            
+
+        df = pd.DataFrame(data, index = [0])
+        results_df = pd.concat([results_df, df])
+        print(results_df)
+    results_df.to_csv("results/results.csv", index = False)
+    return results
+        
 
 
 def set_up_model_train_test(data, cfg, prediction_time):
@@ -153,51 +203,52 @@ def set_up_model_train_test(data, cfg, prediction_time):
 
 
 def main():
-    # Pair inputs and outputs, and split into train/test
     data = pd.read_csv('data/data.csv')
     
     cfg = load_config()
     create_result_dirs(cfg)
+    create_result_csv(cfg)
+    # with open('data/event_timestamps.txt', 'r') as event_file:
+    #     lines = event_file.readlines()
+    # event_times = [line.split() for line in lines]
 
-    with open('data/event_timestamps.txt', 'r') as event_file:
-        lines = event_file.readlines()
-    event_times = [line.split() for line in lines]
 
+    # ### TRAINING ###
+    # for pt in cfg["prediction_time"]:
+    #         print(f"======== Evaluating Lin Regress, t={pt}  ========")
+    #         run_linear_baseline(data, pt)
+    #         optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
+            
+    #         for seed in range(cfg["n_seeds"]):
+    #             model_name = "M1-" + str(seed).zfill(2)
 
-    ### TRAINING ###
-    for pt in cfg["prediction_time"]:
-            print(f"======== Evaluating Lin Regress, t={pt}  ========")
-            run_linear_baseline(data, pt)
-            optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
-            for seed in range(cfg["n_seeds"]):
-                model_name = "M1-" + str(seed).zfill(2)
-                if cfg["train_new_models"]:
-                    torch.manual_seed(seed)
-                    model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
-                    torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
+    #             if cfg["train_new_models"]:
+    #                 torch.manual_seed(seed)
+    #                 model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
+    #                 torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
 
-                ### TESTING ###
-                model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))
-                predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
+    #             ### TESTING ###
+    #             model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))
+    #             predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
 
-### FROM TORRES MAIN FUNCTION - EVALUATION ###
+    #             ### FROM TORRES MAIN FUNCTION - EVALUATION ###
 
-                _,_,_, targets_test = pair_input_output(data, False, pt)
+    #             _,_,_, targets_test = pair_input_output(data, False, pt)
 
-                # Select only events which are in the test set
-                event_times_test = []
-                first_test_event_time = list(targets_test.keys())[0]
-                for event in event_times:
-                    if event[0] >= first_test_event_time:
-                        event_times_test.append(event) 
+    #             event_times_test = []
+    #             first_test_event_time = list(targets_test.keys())[0]
 
-                # Evaluate predictions
-                target_times = list(targets_test.keys())
-                predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+    #             for event in event_times:
+    #                 if event[0] >= first_test_event_time:
+    #                     event_times_test.append(event) 
 
-                print(f"======== Evaluating {model_name}, t={6} ========")
-                evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t={pt}/{model_name}", display= False)
-                
+    #             # Evaluate predictions
+    #             target_times = list(targets_test.keys())
+    #             predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+
+    #             print(f"======== Evaluating {model_name}, t={pt} ========")
+    #             evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t={pt}/{model_name}", display= False)
+    
 ### END ###
 if __name__ == "__main__":
         main()

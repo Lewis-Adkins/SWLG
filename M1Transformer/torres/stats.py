@@ -39,6 +39,15 @@ def mae(targets, predictions, before_log):
     else:
         return np.mean(np.abs(targets - predictions))
 
+def pe(targets, predictions):
+    """
+    Calculates the prediction efficiency of the predictions.
+    :param targets: A list of observed values of the output
+    :param predictions: A list of predicted values of the output
+    :return: The prediction efficiency of the predicted values
+    """
+    return 1 - np.mean((predictions - targets)**2) / np.var(targets)
+   
 
 def x_axis_error(targets, predictions, before_log, display=False, path=None, event_index=None):
     """

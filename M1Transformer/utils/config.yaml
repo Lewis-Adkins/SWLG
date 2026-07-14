@@ -7,7 +7,7 @@ model:
 
 training:
   train_new_models : False
-  n_seeds: 1               # Torres reports mean +/- std over 5 seeds
+  n_seeds: 5               # Torres reports mean +/- std over 5 seeds
   learning_rate: 0.0005
   n_epochs: 1000
   batch_size: 32
@@ -16,5 +16,5 @@ training:
   min_delta: 0.0001
 
 data:
-  prediction_time: [6]   # 6 = 30min, 12 = 60min
+  prediction_time: [6,12]   # 6 = 30min, 12 = 60min
   train_split: 0.8
