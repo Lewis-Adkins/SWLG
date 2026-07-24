@@ -11,7 +11,7 @@ training:
   learning_rate: 0.0005
   n_epochs: 1000
   batch_size: 32
-  num_workers: 4
+  num_workers: 8
   patience: 20             # Torres: early stop, min_delta 1e-4, patience 20
   min_delta: 0.0001
 

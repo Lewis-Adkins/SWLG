@@ -10,9 +10,15 @@ from datetime import datetime
 from torres.load_data import load_series
 from torres.m1 import pair_input_output
 from torres.m1 import evaluate
+from torres.time_series_classification import score_forecast
+from torres.stats import tss_f1
 
 from transformer.m1dataset import M1Dataset
 from transformer.m1transformer import M1Transformer 
+
+from transformer.m1transformersin import M1TransformerSin
+from transformer.m1transfotrmerRoPE import M1TransformerRoPE
+
 
 import torch as tc
 from torch.utils.data import Dataset, DataLoader
@@ -32,25 +38,20 @@ def train_model(model, train_loader, optimizer, loss_fn, device,
         model.train()
         total_loss = 0
         epoch_start_time = datetime.now()
-
+        total_loss = torch.zeros(1, device=device)
         for batch_counter, batch in enumerate(train_loader, start=1):
             x = batch["Current_Flux_Data"].to(device)
             y = batch["Target_Proton_Data"].to(device)
             pred = model(x).squeeze()
             loss = loss_fn(pred, y)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none = True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            total_loss += loss.item()
+            optimizer.step()           
+            total_loss += loss.detach()   # stays on GPU, no sync
+        avg_loss = (total_loss / n_batches).item()   # only sync ONCE, at epoch end
 
-            batch_per = 100 * batch_counter / n_batches
-            print(f"\r{tag} Epoch {epoch+1}/{n_epoch} | "
-                  f"batch {batch_counter}/{n_batches} ({batch_per:.1f}%) | "
-                  f"running loss {total_loss/batch_counter:.4f}",
-                  end="", flush=True)
-
-        avg_loss = total_loss / n_batches
+        # avg_loss = total_loss / n_batches
         epoch_end_time = datetime.now()
 
         if best_loss - avg_loss > min_delta:
@@ -60,10 +61,10 @@ def train_model(model, train_loader, optimizer, loss_fn, device,
         else:
             patience_counter += 1
 
-        print(f"\r{tag} Epoch {epoch+1}/{n_epoch} done in "
+        print(f"{tag} Epoch {epoch+1}/{n_epoch} done in "
               f"{(epoch_end_time - epoch_start_time).total_seconds():.1f}s — "
               f"loss {avg_loss:.4f} | best {best_loss:.4f} | "
-              f"patience {patience_counter}/{patience}" + " " * 15)
+              f"patience {patience_counter}/{patience}")
 
         if patience_counter >= patience:
             print(f"{tag} Converged at epoch {epoch+1}")
@@ -91,7 +92,8 @@ def test_model(model, test_loader, device, loss_fn):
             # loss = loss_fn(y,pred)
             # loss = tc.cat((losses, loss.flatten()))
             # test_loss += loss.item()
-    return predictions
+
+    return predictions 
 
 def load_config(path="utils/config.yaml"):
     with open(path) as f:
@@ -174,14 +176,14 @@ def create_result_csv(cfg):
         results_df = pd.concat([results_df, df])
         print(results_df)
     results_df.to_csv("results/results.csv", index = False)
-    return results
-        
-
+    return results       
 
 def set_up_model_train_test(data, cfg, prediction_time):
-
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = M1Transformer(input_size = 3,dim_val = cfg["dim_val"], window_size= cfg["window_size"]).to(device)
+    model = M1TransformerSin(input_size = 3,dim_val = cfg["dim_val"], window_size= cfg["window_size"]).to(device)
+    torch.set_float32_matmul_precision('high')
+    model = torch.compile(model)
     train, targets_train, test, targets_test = pair_input_output(data, False, prediction_time)
 
     train = np.array([instance.T for instance in train])
@@ -199,7 +201,24 @@ def set_up_model_train_test(data, cfg, prediction_time):
 
     return optimizer, model,  train_loader, test_loader, device, loss_fn
 
+def load_checkpoint_safely(model, path):
+    """Load a state dict that may or may not have a torch.compile '_orig_mod.' prefix,
+    into a model that may or may not currently be compiled."""
+    raw_sd = torch.load(path)
 
+    # detect whether the FILE has the prefix
+    file_has_prefix = any(k.startswith("_orig_mod.") for k in raw_sd.keys())
+
+    # detect whether the MODEL currently expects the prefix (i.e., is compiled)
+    model_is_compiled = hasattr(model, "_orig_mod")
+    target = model._orig_mod if model_is_compiled else model
+
+    if file_has_prefix:
+        # strip it so it matches the plain (uncompiled) module's key names
+        raw_sd = {k.replace("_orig_mod.", "", 1): v for k, v in raw_sd.items()}
+
+    target.load_state_dict(raw_sd)
+    return model
 
 
 def main():
@@ -207,48 +226,57 @@ def main():
     
     cfg = load_config()
     create_result_dirs(cfg)
-    create_result_csv(cfg)
-    # with open('data/event_timestamps.txt', 'r') as event_file:
-    #     lines = event_file.readlines()
-    # event_times = [line.split() for line in lines]
-
-
-    # ### TRAINING ###
-    # for pt in cfg["prediction_time"]:
-    #         print(f"======== Evaluating Lin Regress, t={pt}  ========")
-    #         run_linear_baseline(data, pt)
-    #         optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
-            
-    #         for seed in range(cfg["n_seeds"]):
-    #             model_name = "M1-" + str(seed).zfill(2)
-
-    #             if cfg["train_new_models"]:
-    #                 torch.manual_seed(seed)
-    #                 model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
-    #                 torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
-
-    #             ### TESTING ###
-    #             model.load_state_dict(torch.load(f"models/t={pt}/{model_name}.pt"))
-    #             predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
-
-    #             ### FROM TORRES MAIN FUNCTION - EVALUATION ###
-
-    #             _,_,_, targets_test = pair_input_output(data, False, pt)
-
-    #             event_times_test = []
-    #             first_test_event_time = list(targets_test.keys())[0]
-
-    #             for event in event_times:
-    #                 if event[0] >= first_test_event_time:
-    #                     event_times_test.append(event) 
-
-    #             # Evaluate predictions
-    #             target_times = list(targets_test.keys())
-    #             predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
-
-    #             print(f"======== Evaluating {model_name}, t={pt} ========")
-    #             evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t={pt}/{model_name}", display= False)
     
+    with open('data/event_timestamps.txt', 'r') as event_file:
+        lines = event_file.readlines()
+    event_times = [line.split() for line in lines]
+
+
+    ### TRAINING ###
+    for pt in cfg["prediction_time"]:
+            # print(f"======== Evaluating Lin Regress, t={pt}  ========")
+            # run_linear_baseline(data, pt)
+            
+            
+            # for seed in  range(cfg["n_seeds"]):
+            #     optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
+            #     model_name = "M1-" + str(seed).zfill(2)
+
+            #     if cfg["train_new_models"]:
+            #         torch.manual_seed(seed)
+            #         model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
+            #         torch.save(model.state_dict(), f"models/t={pt}/{model_name}.pt")
+
+            #     ### TESTING ###
+            #     model = load_checkpoint_safely(model, f"models/t={pt}/{model_name}.pt")
+            #     predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
+            #     np.savetxt(f"results/transformer/t={pt}/{model_name}/predictions.txt", predictions ,delimiter=",")
+            #     ### FROM TORRES MAIN FUNCTION - EVALUATION ###
+
+            #     _,_,_, targets_test = pair_input_output(data, False, pt)
+
+            #     event_times_test = []
+            #     first_test_event_time = list(targets_test.keys())[0]
+
+            #     for event in event_times:
+            #         if event[0] >= first_test_event_time:
+            #             event_times_test.append(event) 
+
+            #     ### EVALUTE PREDICTIONS ###
+            #     target_times = list(targets_test.keys())
+               
+            #     predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+
+            #     print(f"======== Evaluating {model_name}, t={pt} ========")
+            #     evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t={pt}/{model_name}", display= False)
+
+            for app in ["app0", "app1", "app2","app3"]:
+                print(app)
+                score_forecast(pt, app)
+
+    ### RECORDING RESULTS ###
+
+    create_result_csv(cfg)    
 ### END ###
 if __name__ == "__main__":
         main()

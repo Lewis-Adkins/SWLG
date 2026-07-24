@@ -2,7 +2,7 @@
 # from keras.layers import Dense, GRU
 # from keras.models import load_model, Sequential
 # from load_data import *
-from torres.stats import mae, x_axis_error, pe, lag_ln10
+from torres.stats import mae, x_axis_error, pe, lag_ln10, tss_f1
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
@@ -209,7 +209,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
     print(f"Average O2P lag = {np.average(o2p_lags): 0.3f}")
     print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
     print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")
-
+    
 
 # def main():
 

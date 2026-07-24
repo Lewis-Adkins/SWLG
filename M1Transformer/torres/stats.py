@@ -176,13 +176,14 @@ def tss_f1(targets, predictions):
     targets_bool = targets > 0
     predictions_bool = predictions > 0
 
+
     # Find confusion matrix and use values to calculate TSS and F1 score
     mtx = confusion_matrix(targets_bool, predictions_bool)
     print(f"Confusion matrix:\n{mtx}")
-    tn, fp, fn, tp = mtx.ravel()
-    tss = (tp / (tp + fn)) - (fp / (fp + tn))
+    # tn, fp, fn, tp = mtx.ravel()
+    # tss = (tp / (tp + fn)) - (fp / (fp + tn))
     f1 = f1_score(targets_bool, predictions_bool)
-    return tss, f1
+    return  f1
 
 
 def calc_feature_importance(estimator, features):
