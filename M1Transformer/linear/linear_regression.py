@@ -1,12 +1,13 @@
+import os
 from torres.m1 import pair_input_output
 from sklearn.linear_model import LinearRegression
 import numpy as np
 from torres.stats import mae, x_axis_error, lag_ln10
 from torres.m1 import evaluate
 
-def run_linear_baseline(data, prediction_time):
+def run_linear_baseline(data, prediction_time, use_phases, run_tag):
 
-    train, targets_train, test, targets_test = pair_input_output(data, False, prediction_time)
+    train, targets_train, test, targets_test = pair_input_output(data, use_phases, prediction_time)
 
     X_train = np.array([instance.flatten() for instance in train])
     X_test = np.array([instance.flatten() for instance in test])
@@ -15,13 +16,14 @@ def run_linear_baseline(data, prediction_time):
     lr_model.fit(X_train, targets_train)
     y_pred = lr_model.predict(X_test)
 
+    path = f"results/linear/t+{prediction_time}/{run_tag}"
+    os.makedirs(path, exist_ok=True)
+    np.savetxt(f"{path}/predictions.txt", y_pred, delimiter=",")
+
 
 # ### FROM TORRES MAIN FUNCTION ###
 #     # Load events for evaluation
 
-
-
-    # _,_,_, targets_test = pair_input_output(data, False, prediction_time)
     event_file = open('data/event_timestamps.txt', 'r')
     lines = event_file.readlines()
     event_times = [line.split() for line in lines]
@@ -40,7 +42,7 @@ def run_linear_baseline(data, prediction_time):
 
 
 
-    evaluate(targets_test, predictions, event_times_test, data, path = f"results/linear/t={prediction_time}", display= False)
+    evaluate(targets_test, predictions, event_times_test, data, path = path, display= False)
 
 
     return y_pred, targets_test
