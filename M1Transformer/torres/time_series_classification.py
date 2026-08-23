@@ -35,13 +35,13 @@ def _count_tp_fp_fn(predictions, targets_train, prediction_time, app, alert_wind
             if app in ["app1", "app2"]:
                 while True in (predictions[t + 1: t + alert_window + 1] > np.log(10)):
                     for t2 in range(alert_window, 0, -1):
-                        if predictions[t + t2] >= np.log(10):
+                        if t + t2 < len(predictions) and predictions[t + t2] >= np.log(10):
                             t += t2
                             break
             else:
 
                 # Yellow bar without green bar
-                while predictions[t + 1] >= np.log(10):
+                while t + 1 < len(predictions) and predictions[t + 1] >= np.log(10):
                     t += 1
 
             end = t + alert_window + 24 + len(targets_train) + prediction_time  # 6 hours after t, offset by training set
@@ -103,12 +103,19 @@ def _test_setup(prediction_time):
     """
     Shared setup for scoring functions: pairs inputs/outputs and loads SEP events
     that fall within the test set.
+
+    Only ever uses dataset 0 (the real, untouched chronological split) --
+    this whole scoring path is positional (row-offset math tied to one
+    contiguous test tail), which doesn't hold for the block-partitioned
+    dataset variants pair_input_output can also produce; see main.py, where
+    score_forecast/score_forecast_linear are only called for dataset 0.
     :param prediction_time: The number of timesteps ahead being predicted
     :return: (targets_train, event_times_test)
     """
 
     data = pd.read_csv("data/data.csv")
-    train, targets_train, test, targets_test = pair_input_output(data, False, prediction_time)
+    trains, targets_trains, tests, targets_tests = pair_input_output(data, False, prediction_time)
+    targets_train = targets_trains[0]
 
     # Load events for evaluation
     event_file = open('data/event_indices.txt', 'r')
@@ -126,9 +133,9 @@ def _test_setup(prediction_time):
     return targets_train, event_times_test
 
 
-def score_forecast(prediction_time, app, run_tag):
-
-    path = f"results/transformer/t+{prediction_time}/{run_tag}"
+def score_forecast(prediction_time, app, run_tag, n_seeds=5):
+    # Only ever scores dataset 0 -- see _test_setup's docstring.
+    path = f"results/transformer/t+{prediction_time}/{run_tag}/dataset0"
     # app0 - approach W
     # app1 - approach EW
     # app2 - approach EAW
@@ -156,7 +163,7 @@ def score_forecast(prediction_time, app, run_tag):
         fns = []
 
         # Evaluate predictions from each run
-        for i in range(1, 6):
+        for i in range(1, n_seeds + 1):
             predictions = load_series(f"{path}/M1-{str(i-1).zfill(2)}/predictions.txt")
 
             tp, fp, fn = _count_tp_fp_fn(predictions, targets_train, prediction_time, app, alert_window, event_times_test)
@@ -194,7 +201,8 @@ def score_forecast_linear(prediction_time, app, run_tag):
     baseline, which has a single run (no seeds) at results/linear/t+{prediction_time}/{run_tag}.
     """
 
-    path = f"results/linear/t+{prediction_time}/{run_tag}"
+    # Only ever scores dataset 0 -- see _test_setup's docstring.
+    path = f"results/linear/t+{prediction_time}/{run_tag}/dataset0"
     if app not in [f"app{i}" for i in range(4)]:
         print("Invalid app selection, exiting.")
         exit(0)

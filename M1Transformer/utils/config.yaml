@@ -1,5 +1,5 @@
 model:
-  type: zero                 # sin | rope | zero | t5
+  type: sin                 # sin | rope | zero | t5
 
   n_encoder_layers: 1      # <-- 1 if matching GRU scale
   dim_val: 16              # <-- 16 if matching GRU scale
@@ -10,17 +10,21 @@ model:
   window_size: 25          # <-- FIXED: was 24, must match your 25-step window
 
 training:
-  train_new_models : True
+  train_new_models : False
   training_linear: True    # if False, skip the linear regression baseline entirely
-  n_seeds: 5               # Torres reports mean +/- std over 5 seeds
+  plot_only: False          # if True, skip training/testing/evaluating entirely and just
+                             # rebuild the aggregate CSVs + comparison plot from results.txt
+                             # files already on disk (no data load, no model, no GPU)
+  n_seeds: 10                # pilot: was 5, dropped to validate the new bootstrap plumbing cheaply
+  n_datasets: 10              # pilot value; dataset 0 is always the real, untouched split (torres/m1.py)
   learning_rate: 0.001
-  n_epochs: 1000
+  n_epochs: 1000               # smoke test: just checking for crashes, not convergence -- restore to 1000 after
   batch_size: 32
   num_workers: 8
   patience: 20             # Torres: early stop, min_delta 1e-4, patience 20
   min_delta: 0.0001
 
 data:
-  prediction_time: [6,12]   # 6 = 30min, 12 = 60min
+  prediction_time: [6]   # 6 = 30min, 12 = 60min
   train_split: 0.8
   use_phases: True         # add background/rising/falling channels to the input window

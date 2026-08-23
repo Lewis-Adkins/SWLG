@@ -25,35 +25,53 @@ def slice_dictionary_keys(dictionary, start, end):
     return {key: dictionary[key] for key in keys}
 
 
+def _event_spans(event_path="data/event_indices.txt", margin=36):
+    """(start, end) row-index span for every labeled event, extended `margin`
+    rows before onset (matches evaluate()'s own 36-row background lookback)
+    through the event's `end` row -- the widest span anything downstream
+    indexes into."""
+    with open(event_path) as f:
+        rows = [[int(v) for v in line.split()] for line in f if line.strip()]
+    return [(row[0] - margin, row[3]) for row in rows]
 
-# def bootstrap(x , y, n_samples, seed):
-#     bootstrapped_data = np.empty((len(x),len(y),2, n_samples))
 
-#     for 
-#     x , y = resample(x,y,replace = True, n_samples = n_samples, random_state = seed)
+def _event_safe_block_bounds(n, size_blocks, spans):
+    """Non-overlapping (start, end) block boundaries tiling [0, n), each
+    ~size_blocks rows, with boundaries pushed forward so none ever falls
+    inside a labeled event's span -- every event ends up fully inside
+    exactly one block, never split across two."""
+    bounds = []
+    start = 0
+    while start < n:
+        end = min(start + size_blocks, n)
+        grew = True
+        while grew:
+            grew = False
+            for s, e in spans:
+                if s < end < e:
+                    end = min(e, n)
+                    grew = True
+        bounds.append((start, end))
+        start = end
+    return bounds
 
 
-    return bootstrapped_data
-
-def pair_input_output(data, use_phase_inputs, prediction_time):
-    """
-    Pair inputs and outputs, and split into training and testing sets.
-    :param data: A DataFrame object
-    :param use_phase_inputs: Whether or not to use phase inputs
-    :param prediction_time: The number of timesteps to predict ahead
-    :return: Training and test inputs and targets
-    """
-
-    # Select features
+def _build_windows(data, use_phase_inputs, prediction_time):
+    """The pure windowing pass: slide a 24-step lookback across the whole
+    (real, untouched, chronologically-ordered) `data` and pair each window
+    with its target. Returns (x, y, target_rows) where target_rows[i] is the
+    raw row index of x[i]/y[i]'s target (t + prediction_time) -- used to
+    decide which train/test block a window belongs to, since the target is
+    what has to land on one side or the other of a block boundary intact."""
     time = list(data['time'].values)
     electron = data['electron'].values
     electron_high = data['electron_high'].values
     proton = data['proton'].values
     phases = np.array([data['background'].values, data['rising'].values, data['falling'].values]).T
 
-    # Pair inputs and outputs
     x = []
     y = []
+    target_rows = []
 
     for t in range(24, len(data) - prediction_time):
 
@@ -78,15 +96,76 @@ def pair_input_output(data, use_phase_inputs, prediction_time):
 
         # Store output; include timestamps
         y.append([time[t + prediction_time], proton[t + prediction_time]])
+        target_rows.append(t + prediction_time)
 
-    # Split train/test
-    # Note that training targets do not need times, but test targets do for synchronization
-    train = x[:int(0.8 * len(x))]
-    targets_train = y[:int(0.8 * len(y))]
-    test = x[int(0.8 * len(x)):]
-    targets_test = y[int(0.8 * len(y)):]
-    targets_test = {target[0]: target[1] for target in targets_test}
-    return np.array(train), np.array(targets_train)[:, 1].astype(np.float64), np.array(test), targets_test
+    return x, y, np.array(target_rows)
+
+
+def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
+                       train_split=0.8, size_blocks=6000, random_state=42,
+                       event_path="data/event_indices.txt"):
+    """
+    Pair inputs and outputs, and split into training and testing sets.
+
+    Returns `n_datasets` versions of each (see below), NOT a single dataset.
+    Dataset 0 is always the real, untouched chronological train_split cut --
+    identical to this function's pre-`n_datasets` behavior. Datasets
+    1..n_datasets-1 are built by randomly relabeling contiguous, event-safe
+    blocks as train/test (same real rows, same real order, just a different
+    random partition each time -- no row is ever duplicated or dropped; see
+    notes/debug for why this is not block-bootstrap-with-replacement).
+
+    :param data: A DataFrame object (never modified or reordered)
+    :param use_phase_inputs: Whether or not to use phase inputs
+    :param prediction_time: The number of timesteps to predict ahead
+    :param n_datasets: How many train/test dataset variants to produce
+    :param train_split: Fraction of rows labeled train in each variant
+    :param size_blocks: Nominal block size for the random-partition variants
+        (datasets 1..n_datasets-1 only; ignored for dataset 0)
+    :return: trains, targets_trains, tests, targets_tests -- each a list of
+        length n_datasets
+    """
+    x, y, target_rows = _build_windows(data, use_phase_inputs, prediction_time)
+    n_windows = len(x)
+
+    # Dataset 0: the real, untouched chronological split (unchanged from
+    # this function's original single-dataset behavior).
+    cut = int(train_split * n_windows)
+    trains = [np.array(x[:cut])]
+    targets_trains = [np.array(y[:cut])[:, 1].astype(np.float64)]
+    tests = [np.array(x[cut:])]
+    targets_tests = [{t[0]: t[1] for t in y[cut:]}]
+
+    if n_datasets > 1:
+        spans = _event_spans(event_path)
+        bounds = _event_safe_block_bounds(len(data), size_blocks, spans)
+        block_starts = np.array([b[0] for b in bounds])
+        row_counts = np.array([b[1] - b[0] for b in bounds])
+        # which block each window's target row falls in -- block membership
+        # is decided by the target, not the input window's last row, so an
+        # event-safe block (guaranteed to contain a whole event's onset..end
+        # span) puts every window whose target is part of that event on the
+        # same side of the train/test line.
+        window_block = np.searchsorted(block_starts, target_rows, side="right") - 1
+
+        for j in range(1, n_datasets):
+            rng = np.random.RandomState(random_state + j)
+            order = rng.permutation(len(bounds))
+            cum_rows = np.cumsum(row_counts[order])
+            n_train_target = train_split * len(data)
+            n_train_blocks = int(np.searchsorted(cum_rows, n_train_target)) + 1
+            train_blocks = set(order[:n_train_blocks].tolist())
+
+            is_train = np.isin(window_block, list(train_blocks))
+            train_idx = np.nonzero(is_train)[0]
+            test_idx = np.nonzero(~is_train)[0]
+
+            trains.append(np.array([x[i] for i in train_idx]))
+            targets_trains.append(np.array([y[i][1] for i in train_idx]).astype(np.float64))
+            tests.append(np.array([x[i] for i in test_idx]))
+            targets_tests.append({y[i][0]: y[i][1] for i in test_idx})
+
+    return trains, targets_trains, tests, targets_tests
 
 
 # def train_model(train, targets_train, algorithm):
@@ -110,21 +189,20 @@ def pair_input_output(data, use_phase_inputs, prediction_time):
 
 
 def evaluate(targets_test, predictions, event_times, data, path, display):
+    # event_times must already be filtered to events whose full onset..peak
+    # span is present in targets_test's keys -- callers should filter with
+    # `event[0] in targets_test` (works for both the real dataset and any
+    # block-partitioned variant, since it checks presence, not position).
 
     # First, get electron, high energy electron, and xray from data with timestamps for plots
     times = list(data["time"].values)
-    electron = data["electron"].values
-    electron_high = data["electron_high"].values
 
-    # Convert to dictionaries
-    electron_dict = {times[i]: electron[i] for i in range(len(electron) - len(targets_test), len(electron))}
-    electron_high_dict = {times[i]: electron_high[i] for i in range(len(electron_high) - len(targets_test),
-                                                                    len(electron_high))}
-
-    # Verify that times synchronize with test targets
-    if targets_test.keys() != electron_dict.keys() != electron_high_dict.keys():
-        print("Timestamps are not synchronized, exiting program.")
-        exit(0)
+    # Keyed by timestamp over the *whole* dataset, not sliced by position --
+    # targets_test's rows may be a scattered subset (block-partitioned
+    # variants), not a contiguous tail, so a positional slice would grab the
+    # wrong rows or miss them entirely.
+    electron_dict = dict(zip(times, data["electron"].values))
+    electron_high_dict = dict(zip(times, data["electron_high"].values))
 
     # Begin evaluating events
     maes = []

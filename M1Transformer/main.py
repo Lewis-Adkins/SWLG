@@ -25,6 +25,7 @@ import torch as tc
 from torch import nn
 
 from linear.linear_regression import run_linear_baseline
+from utils.plot_dataset_comparison import plot_linear_vs_transformer
 
 def train_model(model, train_loader, optimizer, loss_fn, device,
                 n_epoch=1000, patience=20, min_delta=1e-4, tag=""):
@@ -42,7 +43,7 @@ def train_model(model, train_loader, optimizer, loss_fn, device,
         for batch_counter, batch in enumerate(train_loader, start=1):
             x = batch["Current_Flux_Data"]
             y = batch["Target_Proton_Data"]
-            pred = model(x).squeeze()
+            pred = model(x).squeeze(-1)
             loss = loss_fn(pred, y)
             optimizer.zero_grad(set_to_none = True)
             loss.backward()
@@ -87,7 +88,7 @@ def test_model(model, test_loader, device, loss_fn):
         for batch in test_loader:
             x = batch["Current_Flux_Data"]
             # y = batch["Target_Proton_Data"].to(device)
-            pred = model(x).squeeze()
+            pred = model(x).squeeze(-1)
             predictions = tc.cat((predictions, pred.flatten()))
             # loss = loss_fn(y,pred)
             # loss = tc.cat((losses, loss.flatten()))
@@ -123,10 +124,14 @@ def load_config(path="utils/config.yaml"):
 
         "learning_rate":   config["training"]["learning_rate"],
         "n_epochs":         config["training"]["n_epochs"],
+        "patience":         config["training"]["patience"],
+        "min_delta":        config["training"]["min_delta"],
         "batch_size":      config["training"]["batch_size"],
         "train_new_models": config["training"]["train_new_models"],
         "training_linear":  config["training"]["training_linear"],
+        "plot_only":        config["training"]["plot_only"],
         "n_seeds":          config["training"]["n_seeds"],
+        "n_datasets":       config["training"]["n_datasets"],
 
         "prediction_time":    config["data"]["prediction_time"],
         "train_split":      config["data"]["train_split"],
@@ -166,68 +171,77 @@ def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 def create_result_dirs(cfg):
-    """Create results/linear/t+{pt}/{run_tag} and results/transformer/t+{pt}/{run_tag}/{model_name}
-    (one per seed) for every prediction_time in cfg, so evaluate() has
-    somewhere to write before it's called. run_tag namespaces by model
-    architecture + phases so different configs never overwrite each other."""
+    """Create results/linear/t+{pt}/{run_tag}/dataset{j} and
+    results/transformer/t+{pt}/{run_tag}/dataset{j}/{model_name} (one per
+    seed) for every prediction_time and dataset variant in cfg, so
+    evaluate() has somewhere to write before it's called. run_tag namespaces
+    by model architecture + phases so different configs never overwrite
+    each other."""
     tag = cfg["run_tag"]
     for pt in cfg["prediction_time"]:
-        if cfg["training_linear"]:
-            os.makedirs(f"results/linear/t+{pt}/{tag}", exist_ok=True)
-        os.makedirs(f"models/t+{pt}/{tag}", exist_ok=True)
-        for seed in range(cfg["n_seeds"]):
-            model_name = "M1-" + str(seed).zfill(2)
-            os.makedirs(f"results/transformer/t+{pt}/{tag}/{model_name}", exist_ok=True)
+        for dataset_id in range(cfg["n_datasets"]):
+            if cfg["training_linear"]:
+                os.makedirs(f"results/linear/t+{pt}/{tag}/dataset{dataset_id}", exist_ok=True)
+            os.makedirs(f"models/t+{pt}/{tag}/dataset{dataset_id}", exist_ok=True)
+            for seed in range(cfg["n_seeds"]):
+                model_name = "M1-" + str(seed).zfill(2)
+                os.makedirs(f"results/transformer/t+{pt}/{tag}/dataset{dataset_id}/{model_name}", exist_ok=True)
 
 def create_result_csv(cfg):
+    """Aggregates transformer MAE/PE/lag metrics two ways: per (t, dataset)
+    across seeds (mean + standard error of the mean), and per t across
+    dataset variants (mean + std of each dataset's mean) -- the
+    dataset-to-dataset spread is the real uncertainty estimate; seed spread
+    alone understates it."""
     tag = cfg["run_tag"]
-    results = {}
-    final_results = {}
+    metric_names = ["Average MAE", "Average PE", "Average O2P lag",
+                     "Average O2T lag", "Average ln10 lag"]
+    n_seeds = cfg["n_seeds"]
+    n_datasets = cfg["n_datasets"]
+
+    per_dataset_rows = []
+    dataset_means = {pt: {m: [] for m in metric_names} for pt in cfg["prediction_time"]}
+
     for pt in cfg["prediction_time"]:
+        for dataset_id in range(n_datasets):
+            metrics = {m: [] for m in metric_names}
+            for seed in range(n_seeds):
+                model_name = "M1-" + str(seed).zfill(2)
+                path = f"results/transformer/t+{pt}/{tag}/dataset{dataset_id}/{model_name}/results.txt"
+                with open(path) as file:
+                    for line in file:
+                        for m in metric_names:
+                            if line.startswith(m):
+                                metrics[m].append(float(line.split("=")[1].replace(" ", "")))
 
-        metrics = {"Average MAE":[],
-                   "Average PE": [],
-                   "Average O2P lag":[],
-                   "Average O2T lag":[],
-                   "Average ln10 lag":[],
-                    }
-        for seed in range(cfg["n_seeds"]):
-            model_name = model_name = "M1-" + str(seed).zfill(2)
+            row = {"t": pt, "dataset": dataset_id}
+            for m in metric_names:
+                seed_mean = np.mean(metrics[m])
+                seed_se = np.std(metrics[m]) / np.sqrt(n_seeds)
+                row[m] = round(seed_mean, 3)
+                row[f"SE {m} (seeds)"] = round(seed_se, 3)
+                dataset_means[pt][m].append(seed_mean)
+            per_dataset_rows.append(row)
 
-            with open(f"results/transformer/t+{pt}/{tag}/{model_name}/results.txt") as file:
+    per_dataset_df = pd.DataFrame(per_dataset_rows)
 
-                for line in file:
-                    for m in list(metrics):
-                        if line.startswith(m):
-                            metrics[m].append(float(line.split("=")[1].replace(" ", "")))
+    summary_rows = []
+    for pt in cfg["prediction_time"]:
+        row = {"t": pt}
+        for m in metric_names:
+            means = dataset_means[pt][m]
+            row[f"mean {m}"] = round(np.mean(means), 3)
+            row[f"std {m} (across datasets)"] = round(np.std(means), 3)
+        summary_rows.append(row)
+    summary_df = pd.DataFrame(summary_rows)
 
-        results[f"t+{pt}"] = metrics
+    print(per_dataset_df)
+    print(summary_df)
 
-    results_df = pd.DataFrame([])
-
-
-    for  pt in cfg["prediction_time"]:
-
-        data = {}
-        for m in list(metrics):
-            mean = np.mean(results[f"t+{pt}"][m]).round(3)
-            std =  np.std(results[f"t+{pt}"][m]).round(3)
-            results[f"t+{pt}"]["RAVG-" + m] = mean
-            results[f"t+{pt}"]["RSTD-" + m] = std
-
-            data["t="] =  pt
-            data[m] = mean
-            data["std " + m] = std
-
-
-
-
-        df = pd.DataFrame(data, index = [0])
-        results_df = pd.concat([results_df, df])
-        print(results_df)
     os.makedirs(f"results/{tag}", exist_ok=True)
-    results_df.to_csv(f"results/{tag}/results.csv", index = False)
-    return results
+    per_dataset_df.to_csv(f"results/{tag}/results_per_dataset.csv", index=False)
+    summary_df.to_csv(f"results/{tag}/results.csv", index=False)
+    return per_dataset_df, summary_df
 
 def create_f1_csv(f1_records, run_tag):
     """Save the TP/FN/FP/F1 records gathered from score_forecast (per t,
@@ -238,20 +252,22 @@ def create_f1_csv(f1_records, run_tag):
     return f1_df
 
 def create_linear_results_csv(cfg):
-    """Save the linear regression baseline's MAE/PE/lag metrics (one run per t,
-    parsed from results/linear/t+{pt}/{run_tag}/results.txt) to
+    """Save the linear regression baseline's MAE/PE/lag metrics (one run per
+    t/dataset variant, parsed from
+    results/linear/t+{pt}/{run_tag}/dataset{j}/results.txt) to
     results/{run_tag}/linear_results.csv."""
     tag = cfg["run_tag"]
     metric_names = ["Average MAE", "Average PE", "Average O2P lag", "Average O2T lag", "Average ln10 lag"]
     rows = []
     for pt in cfg["prediction_time"]:
-        row = {"t": pt}
-        with open(f"results/linear/t+{pt}/{tag}/results.txt") as file:
-            for line in file:
-                for m in metric_names:
-                    if line.startswith(m):
-                        row[m] = float(line.split("=")[1].replace(" ", ""))
-        rows.append(row)
+        for dataset_id in range(cfg["n_datasets"]):
+            row = {"t": pt, "dataset": dataset_id}
+            with open(f"results/linear/t+{pt}/{tag}/dataset{dataset_id}/results.txt") as file:
+                for line in file:
+                    for m in metric_names:
+                        if line.startswith(m):
+                            row[m] = float(line.split("=")[1].replace(" ", ""))
+            rows.append(row)
     results_df = pd.DataFrame(rows)
     os.makedirs(f"results/{tag}", exist_ok=True)
     results_df.to_csv(f"results/{tag}/linear_results.csv", index=False)
@@ -265,13 +281,16 @@ def create_linear_f1_csv(linear_f1_records, run_tag):
     f1_df.to_csv(f"results/{run_tag}/linear_f1.csv", index=False)
     return f1_df
 
-def set_up_model_train_test(data, cfg, prediction_time):
+def set_up_model_train_test(train, targets_train, test, targets_test, cfg, device):
+    """Build the model/optimizer/loaders for one already-built dataset
+    variant (from pair_input_output's n_datasets output). Doesn't call
+    pair_input_output itself, so every seed trained on the same dataset
+    variant -- and the linear baseline -- share the exact same train/test
+    split; only the dataset variant differs across the outer loop."""
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(cfg, device)
     torch.set_float32_matmul_precision('high')
     model = torch.compile(model)
-    train, targets_train, test, targets_test = pair_input_output(data, cfg["use_phases"], prediction_time)
 
     train = np.array([instance.T for instance in train])
 
@@ -313,68 +332,109 @@ def load_checkpoint_safely(model, path):
 
 
 def main():
+    cfg = load_config()
+    tag = cfg["run_tag"]
+
+    if cfg["plot_only"]:
+        # Skip data load, training, testing, and evaluation entirely --
+        # create_result_csv/create_linear_results_csv only read results.txt
+        # files already on disk, and the plot only reads the CSVs they write.
+        # f1.csv/linear_f1.csv are left untouched (score_forecast isn't
+        # re-run here) since this path doesn't rebuild f1_records.
+        create_result_csv(cfg)
+        if cfg["training_linear"]:
+            create_linear_results_csv(cfg)
+            plot_linear_vs_transformer(tag, save_dir=f"results/{tag}", show=False)
+        return
+
     data = pd.read_csv('data/data.csv')
 
-    cfg = load_config()
     create_result_dirs(cfg)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with open('data/event_timestamps.txt', 'r') as event_file:
         lines = event_file.readlines()
     event_times = [line.split() for line in lines]
 
+    # Fixed per-seed manual_seed base values (kept from the original 5-seed
+    # list for continuity); offset by dataset_id below so a given seed index
+    # doesn't reuse the exact same torch seed across dataset variants. 
+    seed_bases = [1096743781, 1234956713875618956, 1349875190375,
+                  236747823658, 149571475189137, 13495671387651,90878906578,
+                  495870123985725, 196720470596,4893574689476,75829735]
 
     ### TRAINING ###
     f1_records = []
     linear_f1_records = []
     tag = cfg["run_tag"]
     for pt in cfg["prediction_time"]:
-            if cfg["training_linear"]:
-                print(f"======== Evaluating Lin Regress, t+{pt}  ========")
-                run_linear_baseline(data, pt, cfg["use_phases"], tag)
+            trains, targets_trains, tests, targets_tests = pair_input_output(
+                data, cfg["use_phases"], int(pt), n_datasets=cfg["n_datasets"], train_split=cfg["train_split"])
 
-                for app in ["app0", "app1", "app2", "app3"]:
-                    print(app)
-                    linear_f1_records.extend(score_forecast_linear(pt, app, tag))
+            for dataset_id in range(cfg["n_datasets"]):
+                print(f"======== Dataset {dataset_id}/{cfg['n_datasets'] - 1}, t+{pt} "
+                      f"({len(trains[dataset_id])} train / {len(tests[dataset_id])} test windows) ========")
 
+                if cfg["training_linear"]:
+                    print(f"======== Evaluating Lin Regress, t+{pt} dataset {dataset_id} ========")
+                    run_linear_baseline(trains[dataset_id], targets_trains[dataset_id],
+                                         tests[dataset_id], targets_tests[dataset_id],
+                                         data, pt, tag, dataset_id)
 
-            for seed in  [0,1,2,3,4]:
-                a = [1096743781,1234956713875618956,1349875190375,236747823658,149571475189137,13495671387651]
-                torch.manual_seed(a[seed])
-                optimizer,model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(data, cfg, int(pt))
-                model_name = "M1-" + str(seed).zfill(2)
+                    if dataset_id == 0:
+                        for app in ["app0", "app1", "app2", "app3"]:
+                            print(app)
+                            linear_f1_records.extend(score_forecast_linear(pt, app, tag))
+                    else:
+                        print(f"skipping F1/alert-window scoring for dataset {dataset_id}: "
+                              f"score_forecast_linear assumes a contiguous test tail, which this "
+                              f"block-partitioned variant isn't -- see notes/debug for the open item")
 
-                if cfg["train_new_models"]:
+                for seed in range(cfg["n_seeds"]):
+                    torch.manual_seed(seed_bases[seed] + dataset_id)
+                    optimizer, model, train_loader, test_loader, device, loss_fn = set_up_model_train_test(
+                        trains[dataset_id], targets_trains[dataset_id],
+                        tests[dataset_id], targets_tests[dataset_id], cfg, device)
+                    model_name = "M1-" + str(seed).zfill(2)
+                    model_path = f"models/t+{pt}/{tag}/dataset{dataset_id}/{model_name}.pt"
+                    result_path = f"results/transformer/t+{pt}/{tag}/dataset{dataset_id}/{model_name}"
 
-                    model, _ = train_model(model, train_loader, optimizer, loss_fn, device, tag=model_name)
-                    torch.save(model.state_dict(), f"models/t+{pt}/{tag}/{model_name}.pt")
+                    if cfg["train_new_models"] and not os.path.exists(model_path):
 
-                ### TESTING ###
-                model = load_checkpoint_safely(model, f"models/t+{pt}/{tag}/{model_name}.pt")
-                predictions  = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
-                ensure_dir(f"results/transformer/t+{pt}/{tag}/{model_name}")
-                np.savetxt(f"results/transformer/t+{pt}/{tag}/{model_name}/predictions.txt", predictions ,delimiter=",")
-                ### FROM TORRES MAIN FUNCTION - EVALUATION ###
+                        model, _ = train_model(model, train_loader, optimizer, loss_fn, device,
+                                                n_epoch=cfg["n_epochs"], patience=cfg["patience"],
+                                                min_delta=cfg["min_delta"], tag=model_name)
+                        torch.save(model.state_dict(), model_path)
+                    elif cfg["train_new_models"]:
+                        print(f"{model_name} dataset{dataset_id} t+{pt}: checkpoint already exists, skipping training")
 
-                _,_,_, targets_test = pair_input_output(data, cfg["use_phases"], pt)
+                    ### TESTING ###
+                    model = load_checkpoint_safely(model, model_path)
+                    predictions = test_model(model, test_loader, device, loss_fn).detach().cpu().numpy()
+                    ensure_dir(result_path)
+                    np.savetxt(f"{result_path}/predictions.txt", predictions, delimiter=",")
+                    ### FROM TORRES MAIN FUNCTION - EVALUATION ###
 
-                event_times_test = []
-                first_test_event_time = list(targets_test.keys())[0]
+                    targets_test = targets_tests[dataset_id]
 
-                for event in event_times:
-                    if event[0] >= first_test_event_time:
-                        event_times_test.append(event)
+                    # Only events whose full onset..peak span is present in this
+                    # dataset variant's test set -- works for the real dataset
+                    # (dataset 0) and any block-partitioned variant alike, since
+                    # it checks presence, not position.
+                    event_times_test = [event for event in event_times if event[0] in targets_test]
 
-                ### EVALUTE PREDICTIONS ###
-                target_times = list(targets_test.keys())
+                    ### EVALUTE PREDICTIONS ###
+                    target_times = list(targets_test.keys())
 
-                predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+                    predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
 
-                print(f"======== Evaluating {model_name}, t+{pt} ========")
-                evaluate(targets_test, predictions, event_times_test, data, path = f"results/transformer/t+{pt}/{tag}/{model_name}", display= False)
+                    print(f"======== Evaluating {model_name}, t+{pt} dataset {dataset_id} ========")
+                    evaluate(targets_test, predictions, event_times_test, data, path=result_path, display=False)
 
-            for app in ["app0", "app1", "app2","app3"]:
-                print(app)
-                f1_records.extend(score_forecast(pt, app, tag))
+                if dataset_id == 0:
+                    for app in ["app0", "app1", "app2", "app3"]:
+                        print(app)
+                        f1_records.extend(score_forecast(pt, app, tag, n_seeds=cfg["n_seeds"]))
 
 
 
@@ -383,6 +443,7 @@ def main():
     if cfg["training_linear"]:
         create_linear_results_csv(cfg)
         create_linear_f1_csv(linear_f1_records, tag)
+        plot_linear_vs_transformer(tag, save_dir=f"results/{tag}", show=False)
 
 if __name__ == "__main__":
         main()
