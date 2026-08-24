@@ -22,19 +22,24 @@ class GPUBatcher:
     indexing instead of a multi-process DataLoader, which only pays off when
     there's real per-sample CPU preprocessing to parallelize."""
 
-    def __init__(self, data, targets, batch_size, device, shuffle=True):
+    def __init__(self, data, targets, batch_size, device, shuffle=True, drop_last=False):
         self.data = tc.as_tensor(data, dtype=tc.float32, device=device)
         self.targets = tc.as_tensor(targets, dtype=tc.float32, device=device)
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.device = device
+        self.drop_last = drop_last
 
     def __len__(self):
         n = self.data.shape[0]
+        if self.drop_last:
+            return n // self.batch_size
         return (n + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
         n = self.data.shape[0]
+        if self.drop_last:
+            n = (n // self.batch_size) * self.batch_size
         idx = tc.randperm(n, device=self.device) if self.shuffle else tc.arange(n, device=self.device)
         for start in range(0, n, self.batch_size):
             batch_idx = idx[start:start + self.batch_size]
