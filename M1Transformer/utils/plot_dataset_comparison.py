@@ -119,22 +119,64 @@ from torres.load_data import load_series
 #     return figures
 
 
-def _detect_datasets_and_seeds(results_dir, run_tag, prediction_time):
+def _default_base(config_path=None):
+    """Same model_type/split_type/phases_dir derivation as main.py's
+    _result_base(), so this script's default paths match the on-disk layout
+    without needing them passed in by hand."""
+    if config_path is None:
+        config_path = os.path.join(REPO_ROOT, "utils", "config.yaml")
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    model_type = config["model"]["type"]
+    use_phases = config["data"]["use_phases"]
+    n_datasets = config["training"]["n_datasets"]
+    split_type = "multi-split" if n_datasets > 1 else "single-split"
+    phases_dir = "phases" if use_phases else "no-phases"
+    return f"{model_type}/{split_type}/{phases_dir}"
+
+
+def _linear_run_tag(config_path=None):
+    """The run_tag main.py's load_config() builds for model_type "linear":
+    linear_phases / linear_nophases. Linear is a peer model type now, so its
+    predictions live at the standard layout under base "linear/{split}/{phases}"
+    -- see _default_linear_base()."""
+    if config_path is None:
+        config_path = os.path.join(REPO_ROOT, "utils", "config.yaml")
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    use_phases = config["data"]["use_phases"]
+    return f"linear_{'phases' if use_phases else 'nophases'}"
+
+
+def _default_linear_base(config_path=None):
+    """_result_base for model_type "linear": linear/{split_type}/{phases_dir}."""
+    if config_path is None:
+        config_path = os.path.join(REPO_ROOT, "utils", "config.yaml")
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    use_phases = config["data"]["use_phases"]
+    n_datasets = config["training"]["n_datasets"]
+    split_type = "multi-split" if n_datasets > 1 else "single-split"
+    phases_dir = "phases" if use_phases else "no-phases"
+    return f"linear/{split_type}/{phases_dir}"
+
+
+def _detect_datasets_and_seeds(results_dir, run_tag, prediction_time, base):
     """Count dataset{j}/ and M1-0X/ subdirectories on disk instead of
     requiring n_datasets/n_seeds to be passed in and kept in sync by hand."""
-    base = f"{results_dir}/transformer/t+{prediction_time}/{run_tag}"
+    root = f"{results_dir}/{base}/resutls_per_dataset/t+{prediction_time}/{run_tag}"
     dataset_dirs = sorted(
-        (d for d in os.listdir(base) if d.startswith("dataset")),
+        (d for d in os.listdir(root) if d.startswith("dataset")),
         key=lambda d: int(d[len("dataset"):])
     )
     if not dataset_dirs:
-        raise ValueError(f"No dataset* directories found under {base}")
-    seed_dirs = sorted(d for d in os.listdir(f"{base}/{dataset_dirs[0]}") if d.startswith("M1-"))
+        raise ValueError(f"No dataset* directories found under {root}")
+    seed_dirs = sorted(d for d in os.listdir(f"{root}/{dataset_dirs[0]}") if d.startswith("M1-"))
     return len(dataset_dirs), len(seed_dirs)
 
 
 def plot_timestep_lines(run_tag, prediction_time, n_datasets=None, n_seeds=None,
-                         data_path=None, results_dir=None,
+                         data_path=None, results_dir=None, base=None, linear_base=None,
                          train_split=0.8, use_phases=True, show=True, xlim=None):
     """Interactive per-timestep comparison: for every dataset variant, plots
     the actual proton flux, the transformer's seed-averaged prediction, and
@@ -159,9 +201,14 @@ def plot_timestep_lines(run_tag, prediction_time, n_datasets=None, n_seeds=None,
         data_path = os.path.join(REPO_ROOT, "data", "data.csv")
     if results_dir is None:
         results_dir = os.path.join(REPO_ROOT, "results")
+    if base is None:
+        base = _default_base()
+    if linear_base is None:
+        linear_base = _default_linear_base()
+    linear_run_tag = _linear_run_tag()
 
     if n_datasets is None or n_seeds is None:
-        n_datasets, n_seeds = _detect_datasets_and_seeds(results_dir, run_tag, prediction_time)
+        n_datasets, n_seeds = _detect_datasets_and_seeds(results_dir, run_tag, prediction_time, base)
 
     data = pd.read_csv(data_path)
     event_path = os.path.join(REPO_ROOT, "data", "event_indices.txt")
@@ -181,11 +228,12 @@ def plot_timestep_lines(run_tag, prediction_time, n_datasets=None, n_seeds=None,
         seed_preds = []
         for seed in range(n_seeds):
             model_name = "M1-" + str(seed).zfill(2)
-            path = f"{results_dir}/transformer/t+{prediction_time}/{run_tag}/dataset{j}/{model_name}/predictions.txt"
+            path = f"{results_dir}/{base}/resutls_per_dataset/t+{prediction_time}/{run_tag}/dataset{j}/{model_name}/predictions.txt"
             seed_preds.append(load_series(path))
         transformer_full = np.mean(np.array(seed_preds), axis=0)
 
-        linear_path = f"{results_dir}/linear/t+{prediction_time}/{run_tag}/dataset{j}/predictions.txt"
+        linear_path = (f"{results_dir}/{linear_base}/resutls_per_dataset/t+{prediction_time}/"
+                       f"{linear_run_tag}/dataset{j}/M1-00/predictions.txt")
         linear_full = np.array(load_series(linear_path))
 
         n = len(actual_full)

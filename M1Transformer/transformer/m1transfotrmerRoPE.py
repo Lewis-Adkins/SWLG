@@ -23,7 +23,7 @@ class RoPEAttnLayer(nn.Module):
         super().__init__()
         assert d_model % n_heads == 0
         self.d_head = d_model // n_heads
-        self.inv_sqrt_d_head = 1.0 / torch.sqrt(torch.tensor(self.d_head))
+        self.inv_sqrt_d_head = self.d_head ** -0.5
 
         self.multi_head_in_projection = nn.Linear(d_model, 3 * d_model, bias=bias)
         self.multi_head_out_projection = nn.Linear(d_model, d_model, bias=bias)

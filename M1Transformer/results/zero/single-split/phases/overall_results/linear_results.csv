@@ -1,0 +1,3 @@
+t,dataset,Average MAE,Average PE,Average O2P lag,Average O2T lag,Average ln10 lag
+6,0,0.412,0.537,5.556,5.833,2.944
+12,0,0.626,0.14,10.333,9.611,-5.5

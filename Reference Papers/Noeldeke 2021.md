@@ -1,3 +1,4 @@
+
 **Title:** Single Event Upset Investigations on the Flying Laptop Satellite Mission
 **Authors:** Christopher Noeldeke, Maximulan Boettcher, Ulrich Mohr, Steffen Gaisser, Mikel Alvarez Rua, Jens Eickoff, Mike Leslie, MAtt Von Thun, Sabine Klinker, Renuganth Varatharajoo
 **Publisher**: Science Direct

@@ -1,7 +1,7 @@
-# from keras.callbacks import EarlyStopping
-# from keras.layers import Dense, GRU
-# from keras.models import load_model, Sequential
-# from load_data import *
+from keras.callbacks import EarlyStopping
+from keras.layers import Dense, GRU
+from keras.models import load_model, Sequential
+from load_data import *
 from torres.stats import mae, x_axis_error, pe, lag_ln10, tss_f1
 import argparse
 import matplotlib.pyplot as plt
@@ -168,24 +168,24 @@ def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
     return trains, targets_trains, tests, targets_tests
 
 
-# def train_model(train, targets_train, algorithm):
-#     """
-#     Create and train the model.
-#     :param train: A numpy array in which each row is an instance
-#     :param targets_train: The targets for each training instance
-#     :param algorithm: 'regular' or 'rnn'
-#     :return: The trained model
-#     """
-#     model = Sequential()
-#     if algorithm == 'regular':
-#         model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
-#     else:
-#         model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
-#     model.add(Dense(1))
-#     model.compile(loss='mse', optimizer='adam')
-#     model.fit(train, targets_train, epochs=1000, verbose=1,
-#               callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
-#     return model
+def train_model(train, targets_train, algorithm):
+    """
+    Create and train the model.
+    :param train: A numpy array in which each row is an instance
+    :param targets_train: The targets for each training instance
+    :param algorithm: 'nn' or 'rnn'
+    :return: The trained model
+    """
+    model = Sequential()
+    if algorithm == 'nn':
+        model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
+    else:
+        model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
+    model.add(Dense(1))
+    model.compile(loss='mse', optimizer='adam')
+    model.fit(train, targets_train, epochs=1000, verbose=1,
+              callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
+    return model
 
 
 def evaluate(targets_test, predictions, event_times, data, path, display):

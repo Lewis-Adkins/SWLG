@@ -1,0 +1,3 @@
+t,mean Average MAE,std Average MAE (across datasets),mean Average PE,std Average PE (across datasets),mean Average O2P lag,std Average O2P lag (across datasets),mean Average O2T lag,std Average O2T lag (across datasets),mean Average ln10 lag,std Average ln10 lag (across datasets)
+6,0.482,0.17,0.527,0.293,4.658,0.697,3.71,0.828,1.675,2.818
+12,0.783,0.32,0.041,0.485,8.209,1.146,6.986,1.3,3.367,5.351

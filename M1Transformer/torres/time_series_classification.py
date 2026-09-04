@@ -108,7 +108,7 @@ def _test_setup(prediction_time):
     this whole scoring path is positional (row-offset math tied to one
     contiguous test tail), which doesn't hold for the block-partitioned
     dataset variants pair_input_output can also produce; see main.py, where
-    score_forecast/score_forecast_linear are only called for dataset 0.
+    score_forecast is only called for dataset 0.
     :param prediction_time: The number of timesteps ahead being predicted
     :return: (targets_train, event_times_test)
     """
@@ -133,9 +133,10 @@ def _test_setup(prediction_time):
     return targets_train, event_times_test
 
 
-def score_forecast(prediction_time, app, run_tag, n_seeds=5):
+def score_forecast(prediction_time, app, run_tag, base, n_seeds=5):
+    """base = model_type/split_type/phases_dir, see main.py's _result_base()."""
     # Only ever scores dataset 0 -- see _test_setup's docstring.
-    path = f"results/transformer/t+{prediction_time}/{run_tag}/dataset0"
+    path = f"results/{base}/resutls_per_dataset/t+{prediction_time}/{run_tag}/dataset0"
     # app0 - approach W
     # app1 - approach EW
     # app2 - approach EAW
@@ -192,49 +193,4 @@ def score_forecast(prediction_time, app, run_tag, n_seeds=5):
         # If not using green bar, no need to loop over remaining alert window sizes
         # if alert_window == 1 and app in ["app0", "app3"]:
         #     exit(0)
-    return records
-
-
-def score_forecast_linear(prediction_time, app, run_tag):
-    """
-    Same alert-window F1 scoring as score_forecast, but for the linear regression
-    baseline, which has a single run (no seeds) at results/linear/t+{prediction_time}/{run_tag}.
-    """
-
-    # Only ever scores dataset 0 -- see _test_setup's docstring.
-    path = f"results/linear/t+{prediction_time}/{run_tag}/dataset0"
-    if app not in [f"app{i}" for i in range(4)]:
-        print("Invalid app selection, exiting.")
-        exit(0)
-
-    targets_train, event_times_test = _test_setup(prediction_time)
-
-    predictions = load_series(f"{path}/predictions.txt")
-
-    records = []
-
-    for alert_window in [1, 3, 6, 9, 12, 24, 72]:
-
-        if alert_window < 12:
-            print(f"Alert window = {alert_window * 5} minutes")
-        elif alert_window == 12:
-            print("Alert window = 1 hour")
-        else:
-            print(f"Alert window = {alert_window * 5 // 60} hours")
-
-        tp, fp, fn = _count_tp_fp_fn(predictions, targets_train, prediction_time, app, alert_window, event_times_test)
-
-        f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
-        print(f"Linear: TP = {tp}, FN = {fn}, FP = {fp}, F1 = {f1:.2f}\n")
-        records.append({
-            "t": prediction_time,
-            "app": app,
-            "alert_window": alert_window,
-            "model": "linear",
-            "TP": tp,
-            "FN": fn,
-            "FP": fp,
-            "F1": round(f1, 3),
-        })
-
     return records

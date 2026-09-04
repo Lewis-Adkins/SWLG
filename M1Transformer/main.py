@@ -2,432 +2,38 @@ import os
 import numpy as np
 import pandas as pd
 import argparse
-import yaml
 import torch
-
-from datetime import datetime
 
 from torres.load_data import load_series
 from torres.m1 import pair_input_output
 from torres.m1 import evaluate
-from torres.time_series_classification import score_forecast, score_forecast_linear
+from torres.time_series_classification import score_forecast
 from torres.stats import tss_f1
-
-from transformer.m1dataset import GPUBatcher
-from transformer.m1transformerzero import M1TransformerZero
-
-from transformer.m1transformersin import M1TransformerSin
-from transformer.m1transfotrmerRoPE import M1TransformerRoPE
-# from transformer.m1transformerT5 import M1TransformerT5
-
-
-import torch as tc
-from torch import nn
 
 from linear.linear_regression import run_linear_baseline
 
-def train_models(models, optimizers, model_names, train_loader, loss_fn, device,
-                  n_epoch=1000, patience=20, min_delta=1e-4, already_done=None):
-    """Train n models together, one shared pass over train_loader per epoch.
-    Each model tracks its own best_loss/patience/best_state independently --
-    a model that converges early just stops being touched (`done[i]`) while
-    the rest keep training. `already_done` lets callers skip seeds whose
-    checkpoint already exists on disk without building a separate code path.
-    All n models step through each batch together, in program order, on the
-    default stream. Per-model torch.cuda.Streams were tried twice -- once
-    alongside torch.compile(mode="reduce-overhead"), once with plain
-    torch.compile -- and both times measured no throughput benefit AND
-    triggered the same AccumulateGrad stream-mismatch warning, so it's not
-    a CUDA-graph-specific conflict, it's streams vs. torch.compile'd
-    autograd in general on this PyTorch version. Not revisiting streams
-    again without a different underlying technique. The real speedup comes
-    from compilation:
-
-    Each model's forward is torch.compile(mode="reduce-overhead")'d by
-    set_up_models_train_test, which covers forward+backward via CUDA graphs.
-    clip_grad_norm_ and optimizer.step() are left eager here -- a separately
-    compiled step_fn (torch.compile(fullgraph=False)) was tried and measured
-    worse wall time, likely because the optimizer is already fused=True
-    (little dispatch overhead left to remove) so Dynamo's per-call guard-
-    checking cost more than it saved."""
-    n_batches = len(train_loader)
-    n = len(models)
-    best_losses = [float("inf")] * n
-    patience_counters = [0] * n
-    best_states = [None] * n
-    done = list(already_done) if already_done is not None else [False] * n
-
-    for epoch in range(n_epoch):
-        if all(done):
-            break
-        for i, m in enumerate(models):
-            if not done[i]:
-                m.train()
-        total_losses = [torch.zeros(1, device=device) for _ in range(n)]
-        epoch_start_time = datetime.now()
-
-        for batch in train_loader:
-            x = batch["Current_Flux_Data"]
-            y = batch["Target_Proton_Data"]
-
-            for i in range(n):
-                if done[i]:
-                    continue
-                pred = models[i](x).squeeze(-1)
-                loss = loss_fn(pred, y)
-                optimizers[i].zero_grad(set_to_none=True)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(models[i].parameters(), max_norm=1.0)
-                optimizers[i].step()
-                total_losses[i] += loss.detach()   # stays on GPU, no sync
-
-        epoch_end_time = datetime.now()
-        for i in range(n):
-            if done[i]:
-                continue
-            avg_loss = (total_losses[i] / n_batches).item()   # only sync ONCE, at epoch end
-
-            if best_losses[i] - avg_loss > min_delta:
-                best_losses[i] = avg_loss
-                patience_counters[i] = 0
-                best_states[i] = models[i].state_dict()
-            else:
-                patience_counters[i] += 1
-
-            print(f"{model_names[i]} Epoch {epoch+1}/{n_epoch} done in "
-                  f"{(epoch_end_time - epoch_start_time).total_seconds():.1f}s — "
-                  f"loss {avg_loss:.4f} | best {best_losses[i]:.4f} | "
-                  f"patience {patience_counters[i]}/{patience}")
-
-            if patience_counters[i] >= patience:
-                print(f"{model_names[i]} Converged at epoch {epoch+1}")
-                done[i] = True
-
-    for i, model in enumerate(models):
-        if best_states[i] is not None:
-            model.load_state_dict(best_states[i])
-
-    return models, best_losses
-
-def test_model(model, test_loader, device, loss_fn):
-    model.eval()
-
-    predictions = tc.tensor([]).to(device)
-    # original    = tc.tensor([]).to(device)
-    # losses      = tc.tensor([]).to(device)
-    # test_loss   = 0.0
-
-    with torch.no_grad():
-        for batch in test_loader:
-            x = batch["Current_Flux_Data"]
-            # y = batch["Target_Proton_Data"].to(device)
-            pred = model(x).squeeze(-1)
-            predictions = tc.cat((predictions, pred.flatten()))
-            # loss = loss_fn(y,pred)
-            # loss = tc.cat((losses, loss.flatten()))
-            # test_loss += loss.item()
-
-    return predictions
-
-MODEL_REGISTRY = {
-    "sin": M1TransformerSin,
-    "rope": M1TransformerRoPE,
-    "zero": M1TransformerZero,
-    # "t5": M1TransformerT5,
-}
-
-def load_config(path="utils/config.yaml"):
-    with open(path) as f:
-        config = yaml.safe_load(f)
-
-    model_type = config["model"]["type"]
-    if model_type not in MODEL_REGISTRY:
-        raise ValueError(f"Unknown model.type '{model_type}', expected one of {list(MODEL_REGISTRY)}")
-    use_phases = config["data"]["use_phases"]
-
-    cfg = {
-
-        "model_type":       model_type,
-        "n_encoder_layers": config["model"]["n_encoder_layers"],
-        "dim_val":       config["model"]["dim_val"],
-        "dim_feedforward":  config["model"]["dim_feedforward"],
-        "n_heads":          config["model"]["n_heads"],
-        "dropout":          config["model"]["dropout"],
-        "window_size":           config["model"]["window_size"],
-
-        "learning_rate":   config["training"]["learning_rate"],
-        "n_epochs":         config["training"]["n_epochs"],
-        "patience":         config["training"]["patience"],
-        "min_delta":        config["training"]["min_delta"],
-        "batch_size":      config["training"]["batch_size"],
-        "train_new_models": config["training"]["train_new_models"],
-        "training_linear":  config["training"]["training_linear"],
-        "plot_only":        config["training"]["plot_only"],
-        "n_seeds":          config["training"]["n_seeds"],
-        "models_in_parallel": config["training"]["models_in_parallel"],
-        "n_datasets":       config["training"]["n_datasets"],
-
-        "prediction_time":    config["data"]["prediction_time"],
-        "train_split":      config["data"]["train_split"],
-        "use_phases":       use_phases,
-
-        # Namespaces models/ and results/ so switching model type or phases
-        # never silently overwrites a previous run's checkpoints/predictions.
-        "run_tag": f"{model_type}_{'phases' if use_phases else 'nophases'}",
-    }
-    return cfg
-
-
-def build_model(cfg, device):
-    """Construct the configured architecture. RoPE/T5 take d_model + dim_feedforward
-    explicitly; Sin/Zero take dim_val and derive dim_val*4 as the feedforward size
-    internally (which equals cfg["dim_feedforward"]'s default of 64)."""
-    model_cls = MODEL_REGISTRY[cfg["model_type"]]
-    input_size = 6 if cfg["use_phases"] else 3
-
-    kwargs = dict(
-        input_size=input_size,
-        n_heads=cfg["n_heads"],
-        n_encoder_layers=cfg["n_encoder_layers"],
-        dropout=cfg["dropout"],
-        window_size=cfg["window_size"],
-    )
-    if cfg["model_type"] in ("rope", "t5"):
-        kwargs["d_model"] = cfg["dim_val"]
-        kwargs["dim_feedforward"] = cfg["dim_feedforward"]
-    else:
-        kwargs["dim_val"] = cfg["dim_val"]
-
-    return model_cls(**kwargs).to(device)
-
-def ensure_dir(path):
-    """Create path if it doesn't already exist, so writes into it never error."""
-    os.makedirs(path, exist_ok=True)
-
-def _result_base(cfg):
-    """model_type/split_type/phases_dir prefix matching the on-disk layout:
-    models/{base}/t+{pt}/dataset{j}/{model_name}.pt
-    results/{base}/resutls_per_dataset/t+{pt}/{run_tag}/dataset{j}/{model_name or "linear"}/...
-    results/{base}/overall_results/...
-    split_type is "multi-split" if n_datasets > 1, else "single-split" (kept
-    separate so old single-split runs never mix with the new dataset-variant
-    ones). phases_dir is "phases"/"no-phases" -- hyphenated, distinct from
-    run_tag's "nophases". A non-default batch_size gets its own batch_{n}
-    subfolder so a batch-size experiment can never collide with (skip
-    training over, or overwrite results from) the batch_size=32 baseline
-    that everything else is meant to stay comparable to."""
-    split_type = "multi-split" if cfg["n_datasets"] > 1 else "single-split"
-    phases_dir = "phases" if cfg["use_phases"] else "no-phases"
-    base = f"{cfg['model_type']}/{split_type}/{phases_dir}"
-    if cfg["batch_size"] != 32:
-        base += f"/batch_{cfg['batch_size']}"
-    return base
-
-def _linear_base(cfg):
-    """split_type/phases_dir prefix for the linear baseline -- deliberately
-    has no model_type component. Unlike the transformer, the linear
-    regression fit doesn't depend on which architecture (sin/rope/zero)
-    it's being compared against, so it's stored once under results/linear/
-    and shared across every model_type's comparison, instead of being
-    retrained/duplicated under each one."""
-    split_type = "multi-split" if cfg["n_datasets"] > 1 else "single-split"
-    phases_dir = "phases" if cfg["use_phases"] else "no-phases"
-    return f"{split_type}/{phases_dir}"
-
-def create_result_dirs(cfg):
-    """Create models/{base}/t+{pt}/dataset{j},
-    results/{base}/resutls_per_dataset/t+{pt}/{run_tag}/dataset{j}/{model_name}
-    (one per seed) for every prediction_time and dataset variant in cfg, so
-    evaluate() has somewhere to write before it's called -- plus
-    results/linear/{linear_base}/t+{pt}/dataset{j} (shared across model
-    types, see _linear_base)."""
-    tag = cfg["run_tag"]
-    base = _result_base(cfg)
-    linear_base = _linear_base(cfg)
-    for pt in cfg["prediction_time"]:
-        for dataset_id in range(cfg["n_datasets"]):
-            if cfg["training_linear"]:
-                os.makedirs(f"results/linear/{linear_base}/t+{pt}/dataset{dataset_id}", exist_ok=True)
-            os.makedirs(f"models/{base}/t+{pt}/dataset{dataset_id}", exist_ok=True)
-            for seed in range(cfg["n_seeds"]):
-                model_name = "M1-" + str(seed).zfill(2)
-                os.makedirs(f"results/{base}/resutls_per_dataset/t+{pt}/{tag}/dataset{dataset_id}/{model_name}", exist_ok=True)
-
-def create_result_csv(cfg):
-    """Aggregates transformer MAE/PE/lag metrics two ways: per (t, dataset)
-    across seeds (mean + standard error of the mean), and per t across
-    dataset variants (mean + std of each dataset's mean) -- the
-    dataset-to-dataset spread is the real uncertainty estimate; seed spread
-    alone understates it."""
-    tag = cfg["run_tag"]
-    base = _result_base(cfg)
-    metric_names = ["Average MAE", "Average PE", "Average O2P lag",
-                     "Average O2T lag", "Average ln10 lag"]
-    n_seeds = cfg["n_seeds"]
-    n_datasets = cfg["n_datasets"]
-
-    per_dataset_rows = []
-    dataset_means = {pt: {m: [] for m in metric_names} for pt in cfg["prediction_time"]}
-
-    for pt in cfg["prediction_time"]:
-        for dataset_id in range(n_datasets):
-            metrics = {m: [] for m in metric_names}
-            for seed in range(n_seeds):
-                model_name = "M1-" + str(seed).zfill(2)
-                path = f"results/{base}/resutls_per_dataset/t+{pt}/{tag}/dataset{dataset_id}/{model_name}/results.txt"
-                with open(path) as file:
-                    for line in file:
-                        for m in metric_names:
-                            if line.startswith(m):
-                                metrics[m].append(float(line.split("=")[1].replace(" ", "")))
-
-            row = {"t": pt, "dataset": dataset_id}
-            for m in metric_names:
-                seed_mean = np.mean(metrics[m])
-                seed_se = np.std(metrics[m]) / np.sqrt(n_seeds)
-                row[m] = round(seed_mean, 3)
-                row[f"SE {m} (seeds)"] = round(seed_se, 3)
-                dataset_means[pt][m].append(seed_mean)
-            per_dataset_rows.append(row)
-
-    per_dataset_df = pd.DataFrame(per_dataset_rows)
-
-    summary_rows = []
-    for pt in cfg["prediction_time"]:
-        row = {"t": pt}
-        for m in metric_names:
-            means = dataset_means[pt][m]
-            row[f"mean {m}"] = round(np.mean(means), 3)
-            row[f"std {m} (across datasets)"] = round(np.std(means), 3)
-        summary_rows.append(row)
-    summary_df = pd.DataFrame(summary_rows)
-
-    print(per_dataset_df)
-    print(summary_df)
-
-    os.makedirs(f"results/{base}/overall_results", exist_ok=True)
-    per_dataset_df.to_csv(f"results/{base}/overall_results/results_per_dataset.csv", index=False)
-    summary_df.to_csv(f"results/{base}/overall_results/results.csv", index=False)
-    return per_dataset_df, summary_df
-
-def create_f1_csv(f1_records, base):
-    """Save the TP/FN/FP/F1 records gathered from score_forecast (per t,
-    app, alert_window, model) to results/{base}/overall_results/f1.csv."""
-    os.makedirs(f"results/{base}/overall_results", exist_ok=True)
-    f1_df = pd.DataFrame(f1_records)
-    f1_df.to_csv(f"results/{base}/overall_results/f1.csv", index=False)
-    return f1_df
-
-def create_linear_results_csv(cfg):
-    """Save the linear regression baseline's MAE/PE/lag metrics (one run per
-    t/dataset variant, parsed from
-    results/linear/{linear_base}/t+{pt}/dataset{j}/results.txt -- shared
-    across model types, see _linear_base) to
-    results/{base}/overall_results/linear_results.csv (model-type-specific,
-    since that's the comparison it's paired with)."""
-    base = _result_base(cfg)
-    linear_base = _linear_base(cfg)
-    metric_names = ["Average MAE", "Average PE", "Average O2P lag", "Average O2T lag", "Average ln10 lag"]
-    rows = []
-    for pt in cfg["prediction_time"]:
-        for dataset_id in range(cfg["n_datasets"]):
-            row = {"t": pt, "dataset": dataset_id}
-            with open(f"results/linear/{linear_base}/t+{pt}/dataset{dataset_id}/results.txt") as file:
-                for line in file:
-                    for m in metric_names:
-                        if line.startswith(m):
-                            row[m] = float(line.split("=")[1].replace(" ", ""))
-            rows.append(row)
-    results_df = pd.DataFrame(rows)
-    os.makedirs(f"results/{base}/overall_results", exist_ok=True)
-    results_df.to_csv(f"results/{base}/overall_results/linear_results.csv", index=False)
-    return results_df
-
-def create_linear_f1_csv(linear_f1_records, base):
-    """Save the TP/FN/FP/F1 records gathered from score_forecast_linear (per t,
-    app, alert_window) to results/{base}/overall_results/linear_f1.csv."""
-    os.makedirs(f"results/{base}/overall_results", exist_ok=True)
-    f1_df = pd.DataFrame(linear_f1_records)
-    f1_df.to_csv(f"results/{base}/overall_results/linear_f1.csv", index=False)
-    return f1_df
-
-def set_up_models_train_test(train, targets_train, test, targets_test, cfg, device, dataset_id, seed_bases, seeds):
-    """Build one independent model/optimizer pair per seed in `seeds` (a subset
-    of range(cfg["n_seeds"]) -- how many run together is controlled by
-    cfg["models_in_parallel"], not this function) plus ONE shared pair of
-    loaders for one already-built dataset variant (from pair_input_output's
-    n_datasets output). Doesn't call pair_input_output itself, so every seed
-    trained on the same dataset variant -- and the linear baseline -- share
-    the exact same train/test split; only the dataset variant differs across
-    the outer loop."""
-
-    models, optimizers, model_names = [], [], []
-    for seed in seeds:
-        torch.manual_seed(seed_bases[seed] + dataset_id)
-        model = build_model(cfg, device)
-        torch.set_float32_matmul_precision('high')
-        model = torch.compile(model, mode="reduce-overhead")
-        optimizer = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"], fused=device.type == "cuda")
-        models.append(model)
-        optimizers.append(optimizer)
-        model_names.append("M1-" + str(seed).zfill(2))
-
-    train = np.array([instance.T for instance in train])
-    train_loader = GPUBatcher(train, targets_train, batch_size=cfg["batch_size"], device=device,
-                               shuffle=True, drop_last=True)
-
-    test = np.array([instance.T for instance in test])
-    targets_test = np.array(list(targets_test.values()))
-    test_loader = GPUBatcher(test, targets_test, batch_size=cfg["batch_size"], device=device, shuffle=False)
-
-    loss_fn = nn.MSELoss()
-
-    return models, optimizers, model_names, train_loader, test_loader, loss_fn
-
-def load_checkpoint_safely(model, path):
-    """Load a state dict that may or may not have a torch.compile '_orig_mod.' prefix,
-    into a model that may or may not currently be compiled."""
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"No checkpoint at {path}. Set training.train_new_models: true in "
-            f"utils/config.yaml to train one for this model.type/use_phases combination, "
-            f"or double check model.type/use_phases match a run that's already been trained."
-        )
-    raw_sd = torch.load(path)
-
-    # detect whether the FILE has the prefix
-    file_has_prefix = any(k.startswith("_orig_mod.") for k in raw_sd.keys())
-
-    # detect whether the MODEL currently expects the prefix (i.e., is compiled)
-    model_is_compiled = hasattr(model, "_orig_mod")
-    target = model._orig_mod if model_is_compiled else model
-
-    if file_has_prefix:
-        # strip it so it matches the plain (uncompiled) module's key names
-        raw_sd = {k.replace("_orig_mod.", "", 1): v for k, v in raw_sd.items()}
-
-    target.load_state_dict(raw_sd)
-    return model
+from utils.models import load_config
+from utils.file import ensure_dir, _result_base, create_result_dirs, load_checkpoint_safely
+from utils.output import create_result_csv, create_f1_csv
+from utils.training import train_models, test_model, set_up_models_train_test
 
 
 def main():
     
     cfg = load_config()
+    is_linear = cfg["model_type"] == "linear"
     torch._dynamo.config.recompile_limit = cfg["n_seeds"] * cfg["n_datasets"] * len(cfg["prediction_time"]) + 16
     tag = cfg["run_tag"]
     base = _result_base(cfg)
-    linear_base = _linear_base(cfg)
 
     if cfg["plot_only"]:
         # Skip data load, training, testing, and evaluation entirely --
-        # create_result_csv/create_linear_results_csv only read results.txt
-        # files already on disk. f1.csv/linear_f1.csv are left untouched
-        # (score_forecast isn't re-run here) since this path doesn't
-        # rebuild f1_records. Plotting is a separate manual step now
-        # (utils/plot_dataset_comparison.py), not run automatically here.
+        # create_result_csv only reads results.txt files already on disk.
+        # f1.csv is left untouched (score_forecast isn't re-run here) since
+        # this path doesn't rebuild f1_records. Plotting is a separate manual
+        # step now (utils/plot_dataset_comparison.py), not run automatically
+        # here.
         create_result_csv(cfg)
-        if cfg["training_linear"]:
-            create_linear_results_csv(cfg)
         return
 
     data = pd.read_csv('data/data.csv')
@@ -444,11 +50,10 @@ def main():
     # doesn't reuse the exact same torch seed across dataset variants. 
     seed_bases = [1096743781, 1234956713875618956, 1349875190375,
                   236747823658, 149571475189137, 13495671387651,90878906578,
-                  495870123985725, 196720470596,4893574689476,75829735]
+                  495870123985725, 196720470596, 4893574689476, 75829735]
 
     ### TRAINING ###
     f1_records = []
-    linear_f1_records = []
     tag = cfg["run_tag"]
     for pt in cfg["prediction_time"]:
             trains, targets_trains, tests, targets_tests = pair_input_output(
@@ -458,20 +63,22 @@ def main():
                 print(f"======== Dataset {dataset_id}/{cfg['n_datasets'] - 1}, t+{pt} "
                       f"({len(trains[dataset_id])} train / {len(tests[dataset_id])} test windows) ========")
 
-                if cfg["training_linear"]:
-                    print(f"======== Evaluating Lin Regress, t+{pt} dataset {dataset_id} ========")
+                if is_linear:
+                    # Linear is a peer model_type: it writes into the same
+                    # M1-00 result dir a one-seed transformer run would, so
+                    # score_forecast / create_result_csv below need no
+                    # linear-specific branch. n_seeds is pinned to 1 for it
+                    # (utils/models.load_config).
+                    result_path = f"results/{base}/resutls_per_dataset/t+{pt}/{tag}/dataset{dataset_id}/M1-00"
+                    print(f"======== Fitting linear regression, t+{pt} dataset {dataset_id} ========")
                     run_linear_baseline(trains[dataset_id], targets_trains[dataset_id],
-                                         tests[dataset_id], targets_tests[dataset_id],
-                                         data, pt, linear_base, dataset_id)
-
+                                        tests[dataset_id], targets_tests[dataset_id],
+                                        data, pt, result_path, event_times)
                     if dataset_id == 0:
                         for app in ["app0", "app1", "app2", "app3"]:
                             print(app)
-                            linear_f1_records.extend(score_forecast_linear(pt, app, linear_base))
-                    else:
-                        print(f"skipping F1/alert-window scoring for dataset {dataset_id}: "
-                              f"score_forecast_linear assumes a contiguous test tail, which this "
-                              f"block-partitioned variant isn't -- see notes/debug for the open item")
+                            f1_records.extend(score_forecast(pt, app, tag, base, n_seeds=cfg["n_seeds"]))
+                    continue
 
                 group_size = cfg["models_in_parallel"]
                 seed_groups = [range(g, min(g + group_size, cfg["n_seeds"]))
@@ -538,10 +145,6 @@ def main():
 
     create_result_csv(cfg)
     create_f1_csv(f1_records, base)
-    if cfg["training_linear"]:
-        create_linear_results_csv(cfg)
-        create_linear_f1_csv(linear_f1_records, base)
-        # plot_linear_vs_transformer(tag, save_dir=f"results/{tag}", show=False)
 
 if __name__ == "__main__":
         main()
