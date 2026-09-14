@@ -1,9 +1,19 @@
 model:
-  type: rope               # sin | rope | zero | linear
-                            # "linear" runs the sklearn LinearRegression baseline as a
-                            # peer model type (no seeds/epochs/checkpoints -- n_seeds and
-                            # models_in_parallel are forced to 1, results land under
-                            # results/linear/... via the same layout as the transformers).
+  type: rnn               # sin | rope | zero | linear | persistence | posner | nn | rnn
+                            # "linear"/"persistence"/"posner" are peer model types with no
+                            # seeds/epochs/checkpoints (n_seeds and models_in_parallel are
+                            # forced to 1); results land under results/{type}/... via the same
+                            # layout as the transformers. "linear" fits sklearn LinearRegression;
+                            # "persistence" is the naive baseline that predicts no change from
+                            # the most recent flux value; "posner" is Posner (2007)'s
+                            # intensity/rise lookup-table method (see linear/linear_regression.py,
+                            # linear/persistence.py, linear/posner.py). "posner" ignores
+                            # use_phases (its features are electron intensity + rise only) but
+                            # still uses it for results/{type}/{split}/{phases}/... namespacing.
+                            # "nn"/"rnn" are Torres's feedforward/GRU baselines, reimplemented
+                            # in PyTorch (transformer/m1nn.py, transformer/m1rnn.py) -- they DO
+                            # train through the full seeded bootstrap like the transformers.
+                            # Hidden size is hardcoded to 30 in those modules (not config-driven).
 
   n_encoder_layers: 1      # <-- 1 if matching GRU scale
   dim_val: 16              # <-- 16 if matching GRU scale

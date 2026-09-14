@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import torch
 
@@ -6,6 +7,18 @@ import torch
 def ensure_dir(path):
     """Create path if it doesn't already exist, so writes into it never error."""
     os.makedirs(path, exist_ok=True)
+
+def record_training_time(path, start, end):
+    """Write wall-clock training start/end/duration into `path`/training_time.txt
+    -- a recorded artifact, not printed anywhere. `start`/`end` are
+    datetime.now() calls bracketing the actual fit/train call; for a
+    vmap'd multi-seed group they're shared across every model in that
+    group, since they trained together in one call."""
+    duration = (end - start).total_seconds()
+    with open(f"{path}/training_time.txt", "w") as f:
+        f.write(f"Start = {start.isoformat()}\n")
+        f.write(f"End = {end.isoformat()}\n")
+        f.write(f"Duration (s) = {duration:.3f}\n")
 
 def _result_base(cfg):
     """model_type/split_type/phases_dir prefix matching the on-disk layout:

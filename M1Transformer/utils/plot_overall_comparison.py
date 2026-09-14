@@ -1,6 +1,7 @@
 """
-Overall model comparison across the full bootstrap: linear vs. the three
-transformer variants (rope / zero / sin).
+Overall model comparison across the full bootstrap: linear, the three
+transformer variants (rope / zero / sin), the nn/rnn baselines, and the
+posner / persistence naive baselines.
 
 Per prediction horizon (t+6, t+12) it writes TWO figures:
 
@@ -38,9 +39,15 @@ import pandas as pd
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-MODELS = ["linear", "rope", "zero", "sin"]
-MODEL_LABELS = {"linear": "Linear", "rope": "RoPE", "zero": "Zero-init", "sin": "Sinusoidal"}
-MODEL_COLORS = {"linear": "#888888", "rope": "#4C72B0", "zero": "#DD8452", "sin": "#55A868"}
+MODELS = ["linear", "rope", "zero", "sin", "nn", "rnn", "posner", "persistence"]
+MODEL_LABELS = {
+    "linear": "Linear", "rope": "RoPE", "zero": "Zero-init", "sin": "Sinusoidal",
+    "nn": "NN", "rnn": "RNN", "posner": "Posner", "persistence": "Persistence",
+}
+MODEL_COLORS = {
+    "linear": "#888888", "rope": "#4C72B0", "zero": "#DD8452", "sin": "#55A868",
+    "nn": "#C44E52", "rnn": "#8172B2", "posner": "#CCB974", "persistence": "#64B5CD",
+}
 
 APPROACHES = [("app0", "W"), ("app1", "EW"), ("app2", "EAW"), ("app3", "AW")]
 ALERT_WINDOWS = [1, 3, 6, 9, 12, 24, 72]                       # timesteps (5 min each)

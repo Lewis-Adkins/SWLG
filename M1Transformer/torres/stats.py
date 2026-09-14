@@ -46,7 +46,7 @@ def pe(targets, predictions):
     :param predictions: A list of predicted values of the output
     :return: The prediction efficiency of the predicted values
     """
-    return 1 - np.mean((predictions - targets)**2) / np.var(targets)
+    return 1 - (np.mean((predictions - targets)**2) / np.var(targets))
    
 
 def x_axis_error(targets, predictions, before_log, display=False, path=None, event_index=None):

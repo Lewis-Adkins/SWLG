@@ -1,7 +1,13 @@
-from keras.callbacks import EarlyStopping
-from keras.layers import Dense, GRU
-from keras.models import load_model, Sequential
-from load_data import *
+# from keras.callbacks import EarlyStopping
+# from keras.layers import Dense, GRU
+# from keras.models import load_model, Sequential
+# from load_data import *
+# Keras/TensorFlow isn't installed (and TF doesn't support this Python
+# version) -- these imports break every `torres.m1` import, including
+# rope/sin/zero/linear's, if uncommented. The 'nn'/'rnn' baselines below were
+# reimplemented in PyTorch (transformer/m1nn.py, transformer/m1rnn.py) so
+# they run through the same MODEL_REGISTRY/bootstrap pipeline as the
+# transformers, instead of through this Keras train_model.
 from torres.stats import mae, x_axis_error, pe, lag_ln10, tss_f1
 import argparse
 import matplotlib.pyplot as plt
@@ -101,6 +107,69 @@ def _build_windows(data, use_phase_inputs, prediction_time):
     return x, y, np.array(target_rows)
 
 
+def _partition_windows(x, y, target_rows, n_rows, n_datasets, train_split,
+                       size_blocks, random_state, event_path):
+    """Shared train/test bootstrap partitioning, factored out of
+    pair_input_output so other feature representations built from the same
+    (data, prediction_time) -- e.g. torres/posner_method.py's 2-feature
+    (intensity, max_rise) pairs, instead of the transformer's 25-step window
+    -- get IDENTICAL dataset-variant row splits for apples-to-apples model
+    comparison, as long as they pass the same n_datasets/train_split/
+    size_blocks/random_state/event_path. Generic over what each x instance
+    actually contains: only `target_rows` (the row index each instance's
+    target falls on) drives which side of a block boundary it lands on.
+
+    Dataset 0 is always the real, untouched chronological train_split cut.
+    Datasets 1..n_datasets-1 are built by randomly relabeling contiguous,
+    event-safe blocks as train/test (same real rows, same real order, just a
+    different random partition each time -- no row is ever duplicated or
+    dropped; see notes/debug for why this is not block-bootstrap-with-
+    replacement).
+
+    :return: trains, targets_trains, tests, targets_tests -- each a list of
+        length n_datasets
+    """
+    n_windows = len(x)
+
+    # Dataset 0: the real, untouched chronological split.
+    cut = int(train_split * n_windows)
+    trains = [np.array(x[:cut])]
+    targets_trains = [np.array(y[:cut])[:, 1].astype(np.float64)]
+    tests = [np.array(x[cut:])]
+    targets_tests = [{t[0]: t[1] for t in y[cut:]}]
+
+    if n_datasets > 1:
+        spans = _event_spans(event_path)
+        bounds = _event_safe_block_bounds(n_rows, size_blocks, spans)
+        block_starts = np.array([b[0] for b in bounds])
+        row_counts = np.array([b[1] - b[0] for b in bounds])
+        # which block each window's target row falls in -- block membership
+        # is decided by the target, not the input window's last row, so an
+        # event-safe block (guaranteed to contain a whole event's onset..end
+        # span) puts every window whose target is part of that event on the
+        # same side of the train/test line.
+        window_block = np.searchsorted(block_starts, target_rows, side="right") - 1
+
+        for j in range(1, n_datasets):
+            rng = np.random.RandomState(random_state + j)
+            order = rng.permutation(len(bounds))
+            cum_rows = np.cumsum(row_counts[order])
+            n_train_target = train_split * n_rows
+            n_train_blocks = int(np.searchsorted(cum_rows, n_train_target)) + 1
+            train_blocks = set(order[:n_train_blocks].tolist())
+
+            is_train = np.isin(window_block, list(train_blocks))
+            train_idx = np.nonzero(is_train)[0]
+            test_idx = np.nonzero(~is_train)[0]
+
+            trains.append(np.array([x[i] for i in train_idx]))
+            targets_trains.append(np.array([y[i][1] for i in train_idx]).astype(np.float64))
+            tests.append(np.array([x[i] for i in test_idx]))
+            targets_tests.append({y[i][0]: y[i][1] for i in test_idx})
+
+    return trains, targets_trains, tests, targets_tests
+
+
 def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
                        train_split=0.8, size_blocks=6000, random_state=42,
                        event_path="data/event_indices.txt"):
@@ -126,66 +195,30 @@ def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
         length n_datasets
     """
     x, y, target_rows = _build_windows(data, use_phase_inputs, prediction_time)
-    n_windows = len(x)
-
-    # Dataset 0: the real, untouched chronological split (unchanged from
-    # this function's original single-dataset behavior).
-    cut = int(train_split * n_windows)
-    trains = [np.array(x[:cut])]
-    targets_trains = [np.array(y[:cut])[:, 1].astype(np.float64)]
-    tests = [np.array(x[cut:])]
-    targets_tests = [{t[0]: t[1] for t in y[cut:]}]
-
-    if n_datasets > 1:
-        spans = _event_spans(event_path)
-        bounds = _event_safe_block_bounds(len(data), size_blocks, spans)
-        block_starts = np.array([b[0] for b in bounds])
-        row_counts = np.array([b[1] - b[0] for b in bounds])
-        # which block each window's target row falls in -- block membership
-        # is decided by the target, not the input window's last row, so an
-        # event-safe block (guaranteed to contain a whole event's onset..end
-        # span) puts every window whose target is part of that event on the
-        # same side of the train/test line.
-        window_block = np.searchsorted(block_starts, target_rows, side="right") - 1
-
-        for j in range(1, n_datasets):
-            rng = np.random.RandomState(random_state + j)
-            order = rng.permutation(len(bounds))
-            cum_rows = np.cumsum(row_counts[order])
-            n_train_target = train_split * len(data)
-            n_train_blocks = int(np.searchsorted(cum_rows, n_train_target)) + 1
-            train_blocks = set(order[:n_train_blocks].tolist())
-
-            is_train = np.isin(window_block, list(train_blocks))
-            train_idx = np.nonzero(is_train)[0]
-            test_idx = np.nonzero(~is_train)[0]
-
-            trains.append(np.array([x[i] for i in train_idx]))
-            targets_trains.append(np.array([y[i][1] for i in train_idx]).astype(np.float64))
-            tests.append(np.array([x[i] for i in test_idx]))
-            targets_tests.append({y[i][0]: y[i][1] for i in test_idx})
-
-    return trains, targets_trains, tests, targets_tests
+    return _partition_windows(x, y, target_rows, len(data), n_datasets, train_split,
+                              size_blocks, random_state, event_path)
 
 
-def train_model(train, targets_train, algorithm):
-    """
-    Create and train the model.
-    :param train: A numpy array in which each row is an instance
-    :param targets_train: The targets for each training instance
-    :param algorithm: 'nn' or 'rnn'
-    :return: The trained model
-    """
-    model = Sequential()
-    if algorithm == 'nn':
-        model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
-    else:
-        model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
-    model.add(Dense(1))
-    model.compile(loss='mse', optimizer='adam')
-    model.fit(train, targets_train, epochs=1000, verbose=1,
-              callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
-    return model
+# def train_model(train, targets_train, algorithm):
+#     """
+#     Create and train the model.
+#     :param train: A numpy array in which each row is an instance
+#     :param targets_train: The targets for each training instance
+#     :param algorithm: 'nn' or 'rnn'
+#     :return: The trained model
+#     """
+#     model = Sequential()
+#     if algorithm == 'nn':
+#         model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
+#     else:
+#         model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
+#     model.add(Dense(1))
+#     model.compile(loss='mse', optimizer='adam')
+#     model.fit(train, targets_train, epochs=1000, verbose=1,
+#               callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
+#     return model
+# See transformer/m1nn.py and transformer/m1rnn.py for the PyTorch
+# reimplementation actually wired into the model.type: nn / rnn pipeline.
 
 
 def evaluate(targets_test, predictions, event_times, data, path, display):

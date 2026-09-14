@@ -4,22 +4,41 @@ from transformer.m1transformersin import M1TransformerSin
 from transformer.m1transfotrmerRoPE import M1TransformerRoPE
 from transformer.m1transformerzero import M1TransformerZero
 # from transformer.m1transformerT5 import M1TransformerT5
+from transformer.m1nn import M1NN
+from transformer.m1rnn import M1RNN
 
 MODEL_REGISTRY = {
     "sin": M1TransformerSin,
     "rope": M1TransformerRoPE,
     "zero": M1TransformerZero,
     # "t5": M1TransformerT5,
+    "nn": M1NN,
+    "rnn": M1RNN,
 }
 
-# model.type == "linear" selects the sklearn LinearRegression baseline instead
-# of a transformer architecture. It's a peer model type now (same config knob,
-# same on-disk layout via _result_base), not a separate training_linear toggle.
-# It has no seeds/epochs/checkpoints, so load_config forces n_seeds and
-# models_in_parallel to 1 for it -- the aggregation code in utils/output.py
-# then treats it as a one-seed run (single M1-00 directory) with no changes.
+# nn/rnn are the Torres feedforward/GRU baselines (transformer/m1nn.py,
+# transformer/m1rnn.py) -- unlike linear they DO have seeds/epochs and train
+# through the exact same vmap'd bootstrap loop as the transformers, so no
+# n_seeds/models_in_parallel override is needed for them.
+NN_TYPES = {"nn", "rnn"}
+
+# model.type == "linear"/"persistence"/"posner" select non-neural baselines
+# instead of a transformer architecture: sklearn LinearRegression, the naive
+# "predict the most recent value" baseline, and Posner (2007)'s
+# intensity/rise lookup-table method, respectively. All three are peer model
+# types (same config knob, same on-disk layout via _result_base), not a
+# separate toggle -- see linear/linear_regression.py, linear/persistence.py,
+# linear/posner.py, dispatched from main.py. None has seeds/epochs/
+# checkpoints, so load_config forces n_seeds and models_in_parallel to 1 for
+# them -- the aggregation code in utils/output.py then treats each as a
+# one-seed run (single M1-00 directory) with no changes. Posner alone also
+# needs its own pair_input_output (different feature representation), so
+# main.py branches the windowing call on POSNER_TYPE too.
 LINEAR_TYPE = "linear"
-VALID_MODEL_TYPES = set(MODEL_REGISTRY) | {LINEAR_TYPE}
+PERSISTENCE_TYPE = "persistence"
+POSNER_TYPE = "posner"
+NO_TRAIN_TYPES = {LINEAR_TYPE, PERSISTENCE_TYPE, POSNER_TYPE}
+VALID_MODEL_TYPES = set(MODEL_REGISTRY) | NO_TRAIN_TYPES
 
 def load_config(path="utils/config.yaml"):
     with open(path) as f:
@@ -30,11 +49,12 @@ def load_config(path="utils/config.yaml"):
         raise ValueError(f"Unknown model.type '{model_type}', expected one of {sorted(VALID_MODEL_TYPES)}")
     use_phases = config["data"]["use_phases"]
 
-    is_linear = model_type == LINEAR_TYPE
-    # Linear has no seeds -- pin these to 1 regardless of what's in the yaml so
-    # every "loop over n_seeds" downstream sees exactly one M1-00 run.
-    n_seeds = 1 if is_linear else config["training"]["n_seeds"]
-    models_in_parallel = 1 if is_linear else config["training"]["models_in_parallel"]
+    is_no_train = model_type in NO_TRAIN_TYPES
+    # linear/persistence have no seeds -- pin these to 1 regardless of what's
+    # in the yaml so every "loop over n_seeds" downstream sees exactly one
+    # M1-00 run.
+    n_seeds = 1 if is_no_train else config["training"]["n_seeds"]
+    models_in_parallel = 1 if is_no_train else config["training"]["models_in_parallel"]
 
     cfg = {
 
@@ -71,9 +91,15 @@ def load_config(path="utils/config.yaml"):
 def build_model(cfg, device):
     """Construct the configured architecture. RoPE/T5 take d_model + dim_feedforward
     explicitly; Sin/Zero take dim_val and derive dim_val*4 as the feedforward size
-    internally (which equals cfg["dim_feedforward"]'s default of 64)."""
+    internally (which equals cfg["dim_feedforward"]'s default of 64). nn/rnn
+    (M1NN/M1RNN) don't have attention heads/layers/dropout at all -- their
+    hidden size is hardcoded to 30 inside the modules to match Torres's Keras
+    baseline, so they only need input_size/window_size here."""
     model_cls = MODEL_REGISTRY[cfg["model_type"]]
     input_size = 6 if cfg["use_phases"] else 3
+
+    if cfg["model_type"] in NN_TYPES:
+        return model_cls(input_size=input_size, window_size=cfg["window_size"]).to(device)
 
     kwargs = dict(
         input_size=input_size,
