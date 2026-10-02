@@ -1,19 +1,34 @@
 model:
-  type: rnn               # sin | rope | zero | linear | persistence | posner | nn | rnn
+  type: autogluon          # sin | rope | zero | linear | persistence | posner | nn | rnn | autogluon
                             # "linear"/"persistence"/"posner" are peer model types with no
                             # seeds/epochs/checkpoints (n_seeds and models_in_parallel are
                             # forced to 1); results land under results/{type}/... via the same
                             # layout as the transformers. "linear" fits sklearn LinearRegression;
                             # "persistence" is the naive baseline that predicts no change from
                             # the most recent flux value; "posner" is Posner (2007)'s
-                            # intensity/rise lookup-table method (see linear/linear_regression.py,
-                            # linear/persistence.py, linear/posner.py). "posner" ignores
+                            # intensity/rise lookup-table method (see forecasting_models/linear_regression.py,
+                            # forecasting_models/persistence.py, forecasting_models/posner.py). "posner" ignores
                             # use_phases (its features are electron intensity + rise only) but
                             # still uses it for results/{type}/{split}/{phases}/... namespacing.
                             # "nn"/"rnn" are Torres's feedforward/GRU baselines, reimplemented
-                            # in PyTorch (transformer/m1nn.py, transformer/m1rnn.py) -- they DO
+                            # in PyTorch (forecasting_models/m1nn.py, forecasting_models/m1rnn.py) -- they DO
                             # train through the full seeded bootstrap like the transformers.
                             # Hidden size is hardcoded to 30 in those modules (not config-driven).
+                            # "autogluon" fits AutoGluon TimeSeries models that can take all 3
+                            # channels (electron, electron_high, proton) as input, matching every
+                            # other model.type here (forecasting_models/autogluon.py) -- unlike
+                            # every other model.type, this ONE config value fans out into 4
+                            # independent sub-pipelines (TemporalFusionTransformer, Chronos-2 as
+                            # real predictors; Naive, Average as trivial baselines -- see
+                            # notes/autogluon_model_selection.md for why these 4 and not the rest
+                            # of AutoGluon's ~30-model zoo), each run exactly like its own
+                            # model.type (results/autogluon_<name>/..., its own seeded
+                            # M1-00..M1-{n_seeds-1} slots using training.n_seeds normally, its own
+                            # overall_results/{results,f1}.csv). MUST be run under .venv-autogluon
+                            # (Python 3.10-3.13; AutoGluon doesn't support the 3.14 the rest of
+                            # this repo uses), e.g. .venv-autogluon\Scripts\python.exe main.py.
+                            # See the `autogluon:` section below -- and its SCALE WARNING before
+                            # running with the training.n_datasets/n_seeds defaults below.
 
   n_encoder_layers: 1      # <-- 1 if matching GRU scale
   dim_val: 16              # <-- 16 if matching GRU scale
@@ -43,3 +58,31 @@ data:
   prediction_time: [6,12]   # 6 = 30min, 12 = 60min
   train_split: 0.8
   use_phases: True         # add background/rising/falling channels to the input window
+
+autogluon:
+  time_limit_minutes:       # only used when model.type: autogluon. Left blank (null) by
+                            # default = NO time limit -- fitting runs until GLUONTS_TYPES models'
+                            # own early_stopping_patience (training.patience below, wired through
+                            # -- see forecasting_models/autogluon.py) or max_epochs
+                            # (training.n_epochs below) stops it, same philosophy as
+                            # utils/training.py's train_models: no wall-clock cutoff, only
+                            # patience-based early stopping. A time limit that expires before a
+                            # model's own convergence criteria do just cuts it off mid-training
+                            # with whatever it has -- worse than letting it actually finish, so
+                            # this is off by default. Checked against ~1000 already-completed
+                            # fits' recorded Duration (training_time.txt) under the OLD 3-minute
+                            # default: none came close to hitting that ceiling (max observed was
+                            # 155s), meaning early stopping -- not the clock -- was already what
+                            # ended every one of them; that data is unaffected by this change.
+                            # Set a number of minutes here if you want a ceiling back (e.g. while
+                            # iterating quickly) -- forecasting_models/autogluon.py's "didn't
+                            # finish fitting" RuntimeError only fires for a real error now, not a
+                            # timeout, since there's nothing to time out against by default.
+                            #
+                            # SCALE WARNING: total fit() calls = len(ZOO_MODELS) * n_datasets *
+                            # len(prediction_time) * n_seeds -- at this file's training.n_datasets
+                            # (10) / training.n_seeds (10) / data.prediction_time ([6,12])
+                            # defaults and forecasting_models/autogluon.py's current 4-model zoo,
+                            # that's 4*10*2*10 = 800 independent fits, each running to full
+                            # convergence rather than a fixed budget -- total wall time is less
+                            # predictable than before; budget accordingly.

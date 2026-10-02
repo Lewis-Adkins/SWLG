@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from transformer.m1dataset import GPUBatcher
+from forecasting_models.m1dataset import GPUBatcher
 from utils.models import build_model
 
 

@@ -1,11 +1,11 @@
 import yaml
 
-from transformer.m1transformersin import M1TransformerSin
-from transformer.m1transfotrmerRoPE import M1TransformerRoPE
-from transformer.m1transformerzero import M1TransformerZero
-# from transformer.m1transformerT5 import M1TransformerT5
-from transformer.m1nn import M1NN
-from transformer.m1rnn import M1RNN
+from forecasting_models.m1transformersin import M1TransformerSin
+from forecasting_models.m1transfotrmerRoPE import M1TransformerRoPE
+from forecasting_models.m1transformerzero import M1TransformerZero
+# from forecasting_models.m1transformerT5 import M1TransformerT5
+from forecasting_models.m1nn import M1NN
+from forecasting_models.m1rnn import M1RNN
 
 MODEL_REGISTRY = {
     "sin": M1TransformerSin,
@@ -38,7 +38,19 @@ LINEAR_TYPE = "linear"
 PERSISTENCE_TYPE = "persistence"
 POSNER_TYPE = "posner"
 NO_TRAIN_TYPES = {LINEAR_TYPE, PERSISTENCE_TYPE, POSNER_TYPE}
-VALID_MODEL_TYPES = set(MODEL_REGISTRY) | NO_TRAIN_TYPES
+
+# "autogluon" runs entirely through its own top-level pipeline (see main.py's
+# short-circuit and forecasting_models/autogluon.py's run_autogluon_pipeline),
+# bypassing both the NO_TRAIN_TYPES path above AND the torch MODEL_REGISTRY
+# training loop. Unlike linear/persistence/posner it DOES use the configured
+# n_seeds normally (every one of its 10 zoo models gets a full n_seeds worth
+# of independently-seeded fits, same as nn/rnn) -- deliberately NOT included
+# in NO_TRAIN_TYPES so the n_seeds=1 pin below doesn't apply to it. Only
+# imported lazily (here and in main.py) since it pulls in AutoGluon, which
+# needs its own Python 3.10-3.13 venv (.venv-autogluon) separate from the
+# rest of this repo's 3.14 interpreter.
+AUTOGLUON_TYPE = "autogluon"
+VALID_MODEL_TYPES = set(MODEL_REGISTRY) | NO_TRAIN_TYPES | {AUTOGLUON_TYPE}
 
 def load_config(path="utils/config.yaml"):
     with open(path) as f:
@@ -50,11 +62,24 @@ def load_config(path="utils/config.yaml"):
     use_phases = config["data"]["use_phases"]
 
     is_no_train = model_type in NO_TRAIN_TYPES
-    # linear/persistence have no seeds -- pin these to 1 regardless of what's
-    # in the yaml so every "loop over n_seeds" downstream sees exactly one
-    # M1-00 run.
+    # linear/persistence/posner have no seeds -- pin these to 1 regardless of
+    # what's in the yaml so every "loop over n_seeds" downstream sees exactly
+    # one M1-00 run. autogluon is NOT in NO_TRAIN_TYPES (see its definition
+    # above), so it falls through to the normal config["training"]["n_seeds"]
+    # here, same as nn/rnn/the transformers.
     n_seeds = 1 if is_no_train else config["training"]["n_seeds"]
     models_in_parallel = 1 if is_no_train else config["training"]["models_in_parallel"]
+
+    autogluon_time_limit_seconds = None
+    if model_type == AUTOGLUON_TYPE:
+        # Absent/null in the yaml (the default) -> None -> no time limit --
+        # fitting runs until early_stopping_patience/max_epochs stop it, the
+        # same philosophy as utils/training.py's train_models (no wall-clock
+        # cutoff, only patience). Only converted to seconds here if the user
+        # explicitly opts back into a ceiling.
+        time_limit_minutes = config.get("autogluon", {}).get("time_limit_minutes")
+        if time_limit_minutes is not None:
+            autogluon_time_limit_seconds = time_limit_minutes * 60
 
     cfg = {
 
@@ -80,6 +105,8 @@ def load_config(path="utils/config.yaml"):
         "prediction_time":    config["data"]["prediction_time"],
         "train_split":      config["data"]["train_split"],
         "use_phases":       use_phases,
+
+        "autogluon_time_limit_seconds": autogluon_time_limit_seconds,
 
         # Namespaces models/ and results/ so switching model type or phases
         # never silently overwrites a previous run's checkpoints/predictions.

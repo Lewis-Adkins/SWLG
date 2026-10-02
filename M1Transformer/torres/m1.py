@@ -10,6 +10,9 @@
 # transformers, instead of through this Keras train_model.
 from torres.stats import mae, x_axis_error, pe, lag_ln10, tss_f1
 import argparse
+# matplotlib.use("Agg") is set in torres/stats.py, imported above -- it's the
+# first module in this chain to import pyplot, so it's the one place that
+# actually controls backend selection.
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -108,7 +111,7 @@ def _build_windows(data, use_phase_inputs, prediction_time):
 
 
 def _partition_windows(x, y, target_rows, n_rows, n_datasets, train_split,
-                       size_blocks, random_state, event_path):
+                       size_blocks, random_state, event_path, return_target_rows=False):
     """Shared train/test bootstrap partitioning, factored out of
     pair_input_output so other feature representations built from the same
     (data, prediction_time) -- e.g. torres/posner_method.py's 2-feature
@@ -126,8 +129,18 @@ def _partition_windows(x, y, target_rows, n_rows, n_datasets, train_split,
     dropped; see notes/debug for why this is not block-bootstrap-with-
     replacement).
 
+    :param return_target_rows: if True, also return target_rows_trains/
+        target_rows_tests (each instance's raw row index, index-aligned with
+        trains[j]/tests[j]) as a 5th/6th return value -- needed by callers
+        that must look up data outside the window each x instance already
+        carries (e.g. forecasting_models/autogluon.py, which needs the whole
+        t+1..t+prediction_time future span, not just the single t+prediction_time
+        point every other model_type trains on). Off by default so every
+        existing caller (pair_input_output, posner.py's pair_input_output,
+        both of which unpack this return positionally) is unaffected.
     :return: trains, targets_trains, tests, targets_tests -- each a list of
-        length n_datasets
+        length n_datasets -- plus target_rows_trains, target_rows_tests if
+        return_target_rows is True
     """
     n_windows = len(x)
 
@@ -137,6 +150,8 @@ def _partition_windows(x, y, target_rows, n_rows, n_datasets, train_split,
     targets_trains = [np.array(y[:cut])[:, 1].astype(np.float64)]
     tests = [np.array(x[cut:])]
     targets_tests = [{t[0]: t[1] for t in y[cut:]}]
+    target_rows_trains = [target_rows[:cut]]
+    target_rows_tests = [target_rows[cut:]]
 
     if n_datasets > 1:
         spans = _event_spans(event_path)
@@ -166,13 +181,17 @@ def _partition_windows(x, y, target_rows, n_rows, n_datasets, train_split,
             targets_trains.append(np.array([y[i][1] for i in train_idx]).astype(np.float64))
             tests.append(np.array([x[i] for i in test_idx]))
             targets_tests.append({y[i][0]: y[i][1] for i in test_idx})
+            target_rows_trains.append(target_rows[train_idx])
+            target_rows_tests.append(target_rows[test_idx])
 
+    if return_target_rows:
+        return trains, targets_trains, tests, targets_tests, target_rows_trains, target_rows_tests
     return trains, targets_trains, tests, targets_tests
 
 
 def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
                        train_split=0.8, size_blocks=6000, random_state=42,
-                       event_path="data/event_indices.txt"):
+                       event_path="data/event_indices.txt", return_target_rows=False):
     """
     Pair inputs and outputs, and split into training and testing sets.
 
@@ -191,12 +210,16 @@ def pair_input_output(data, use_phase_inputs, prediction_time, n_datasets=1,
     :param train_split: Fraction of rows labeled train in each variant
     :param size_blocks: Nominal block size for the random-partition variants
         (datasets 1..n_datasets-1 only; ignored for dataset 0)
+    :param return_target_rows: see _partition_windows -- default False keeps
+        this function's return signature unchanged for every existing caller.
     :return: trains, targets_trains, tests, targets_tests -- each a list of
-        length n_datasets
+        length n_datasets -- plus target_rows_trains, target_rows_tests if
+        return_target_rows is True
     """
     x, y, target_rows = _build_windows(data, use_phase_inputs, prediction_time)
     return _partition_windows(x, y, target_rows, len(data), n_datasets, train_split,
-                              size_blocks, random_state, event_path)
+                              size_blocks, random_state, event_path,
+                              return_target_rows=return_target_rows)
 
 
 # def train_model(train, targets_train, algorithm):

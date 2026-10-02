@@ -1,0 +1,113 @@
+Event 1
+MAE =  0.689
+O2P lag =  17.000
+O2T lag =  15.000
+ln10 lag =  74.000
+
+Event 2
+MAE =  0.198
+O2P lag =  18.000
+O2T lag =  17.000
+ln10 lag =  27.000
+
+Event 3
+MAE =  0.869
+O2P lag =  16.000
+O2T lag =  12.000
+ln10 lag =  14.000
+
+Event 4
+MAE =  0.199
+O2P lag =  17.000
+O2T lag =  16.000
+ln10 lag =  18.000
+
+Event 5
+MAE =  1.322
+O2P lag =  20.000
+O2T lag =  6.000
+ln10 lag =  20.000
+
+Event 6
+MAE =  0.849
+O2P lag =  19.000
+O2T lag =  8.000
+ln10 lag =  18.000
+
+Event 7
+MAE =  1.004
+O2P lag =  16.000
+O2T lag =  16.000
+ln10 lag =  1.000
+
+Event 8
+MAE =  1.141
+O2P lag =  18.000
+O2T lag =  18.000
+ln10 lag =  39.000
+
+Event 9
+MAE =  2.432
+O2P lag =  19.000
+O2T lag =  12.000
+ln10 lag =  18.000
+
+Event 10
+MAE =  0.465
+O2P lag =  18.000
+O2T lag =  18.000
+ln10 lag =  10.000
+
+Event 11
+MAE =  1.022
+O2P lag =  17.000
+O2T lag =  10.000
+ln10 lag =  21.000
+
+Event 12
+MAE =  0.632
+O2P lag =  17.000
+O2T lag =  16.000
+ln10 lag =  16.000
+
+Event 13
+MAE =  2.213
+O2P lag =  19.000
+O2T lag =  19.000
+ln10 lag =  0.000
+
+Event 14
+MAE =  0.662
+O2P lag =  17.000
+O2T lag =  11.000
+ln10 lag =  19.000
+
+Event 15
+MAE =  0.153
+O2P lag =  19.000
+O2T lag =  23.000
+ln10 lag =  25.000
+
+Event 16
+MAE =  0.418
+O2P lag =  18.000
+O2T lag =  19.000
+ln10 lag =  12.000
+
+Event 17
+MAE =  1.740
+O2P lag =  20.000
+O2T lag =  9.000
+ln10 lag =  21.000
+
+Event 18
+MAE =  0.601
+O2P lag =  17.000
+O2T lag =  23.000
+ln10 lag =  13.000
+
+Average MAE =  0.923
+Average PE = -0.469
+Average O2P lag =  17.889
+Average O2T lag =  14.889
+Average ln10 lag =  20.333

@@ -11,11 +11,11 @@ from torres.m1 import evaluate
 from torres.time_series_classification import score_forecast
 from torres.stats import tss_f1
 
-from linear.linear_regression import run_linear_baseline
-from linear.persistence import run_persistence_baseline
-from linear.posner import pair_input_output as posner_pair_input_output, run_posner_baseline
+from forecasting_models.linear_regression import run_linear_baseline
+from forecasting_models.persistence import run_persistence_baseline
+from forecasting_models.posner import pair_input_output as posner_pair_input_output, run_posner_baseline
 
-from utils.models import load_config, LINEAR_TYPE, POSNER_TYPE, NO_TRAIN_TYPES
+from utils.models import load_config, LINEAR_TYPE, POSNER_TYPE, AUTOGLUON_TYPE, NO_TRAIN_TYPES
 from utils.file import ensure_dir, _result_base, create_result_dirs, load_checkpoint_safely, record_training_time
 from utils.output import create_result_csv, create_f1_csv
 from utils.training import train_models, test_model, set_up_models_train_test
@@ -36,13 +36,15 @@ def main():
         # this path doesn't rebuild f1_records. Plotting is a separate manual
         # step now (utils/plot_dataset_comparison.py), not run automatically
         # here.
-        create_result_csv(cfg)
+        if cfg["model_type"] == AUTOGLUON_TYPE:
+            from forecasting_models.autogluon import MODEL_NAMES, zoo_cfg
+            for zoo_name in MODEL_NAMES:
+                create_result_csv(zoo_cfg(cfg, zoo_name))
+        else:
+            create_result_csv(cfg)
         return
 
     data = pd.read_csv('data/data.csv')
-
-    create_result_dirs(cfg)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with open('data/event_timestamps.txt', 'r') as event_file:
         lines = event_file.readlines()
@@ -50,10 +52,22 @@ def main():
 
     # Fixed per-seed manual_seed base values (kept from the original 5-seed
     # list for continuity); offset by dataset_id below so a given seed index
-    # doesn't reuse the exact same torch seed across dataset variants. 
+    # doesn't reuse the exact same torch seed across dataset variants.
     seed_bases = [1096743781, 1234956713875618956, 1349875190375,
                   236747823658, 149571475189137, 13495671387651,90878906578,
                   495870123985725, 196720470596, 4893574689476, 75829735]
+
+    if cfg["model_type"] == AUTOGLUON_TYPE:
+        # AutoGluon has its own top-level pipeline entirely -- 10 zoo models,
+        # each run as its own independent model_type (results/autogluon_<name>/...)
+        # with its own seeded M1-00..M1-{n_seeds-1} slots. See
+        # forecasting_models/autogluon.py's run_autogluon_pipeline docstring.
+        from forecasting_models.autogluon import run_autogluon_pipeline
+        run_autogluon_pipeline(cfg, data, event_times, seed_bases)
+        return
+
+    create_result_dirs(cfg)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ### TRAINING ###
     f1_records = []
@@ -62,7 +76,7 @@ def main():
             if cfg["model_type"] == POSNER_TYPE:
                 # Posner uses its own 2-feature (intensity, max_rise)
                 # representation instead of the 25-step window, but the same
-                # underlying _partition_windows -- see linear/posner.py --
+                # underlying _partition_windows -- see forecasting_models/posner.py --
                 # so its dataset variants line up row-for-row with every
                 # other model_type's for the same (pt, n_datasets).
                 trains, targets_trains, tests, targets_tests = posner_pair_input_output(

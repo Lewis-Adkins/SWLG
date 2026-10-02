@@ -8,6 +8,17 @@ Additionally, a function for plotting actual vs. predicted is implemented.
 
 # from features import sigma
 from sklearn.metrics import confusion_matrix, f1_score
+import matplotlib
+# Force the non-interactive Agg backend -- this is the first module in the
+# torres.m1 import chain to import pyplot, so it's the one place that
+# actually controls backend selection (matplotlib.use() only takes effect
+# before pyplot's first import). Figures here and in torres/m1.py's
+# evaluate() are only ever saved to disk (plt.savefig), never shown
+# interactively, and the default TkAgg backend's Figure/Image __del__ hooks
+# crash with "main thread is not in main loop" (harmless but noisy --
+# swallowed by Python's GC) once anything spawns background threads, e.g.
+# AutoGluon's internal worker threads during fit()/predict().
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 

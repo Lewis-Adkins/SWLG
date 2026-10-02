@@ -15,8 +15,8 @@ import sys
 
 # Running this file directly (a plain `python utils/plot_dataset_comparison.py`,
 # which is also what an IDE's Run button does) only puts utils/ on sys.path,
-# not the repo root -- add it so `from torres...`/`from linear...` resolve
-# the same way they do when main.py imports this module normally. Also used
+# not the repo root -- add it so `from torres...`/`from forecasting_models...`
+# resolve the same way they do when main.py imports this module normally. Also used
 # below to resolve config.yaml/results/data.csv paths so they don't depend
 # on the current working directory the script happened to be launched from.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
