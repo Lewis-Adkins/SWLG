@@ -8,7 +8,7 @@ class persistence:
     def __init__(self):
         self.name = "persistence"
         self.type = "baseline"
-    def run_persistence_baseline(self, test, targets_test, data, prediction_time, result_path, event_times):
+    def run(self, test, targets_test, data, result_path, event_times):
         """The naive 'nothing changes' baseline: predict the flux at t+prediction_time
         as whatever it currently is at t. No fitting -- only needs the test
         windows, not train/targets_train.

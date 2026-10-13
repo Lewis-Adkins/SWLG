@@ -1,5 +1,5 @@
 model:
-  type: sin          # sin | rope | zero | linear | persistence | posner | nn | rnn | autogluon
+  type: linear          # sin | rope | zero | linear | persistence | posner | nn | rnn | autogluon
   n_encoder_layers: 1      
   dim_val: 16              
   dim_feedforward: 64                                

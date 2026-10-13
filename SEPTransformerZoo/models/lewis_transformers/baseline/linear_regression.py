@@ -9,8 +9,8 @@ class LinRegress():
     def __init__(self):
         self.name = "linear_regression"
         self.type = "baseline"
-    def run(train, targets_train, test, targets_test, data,
-                            result_path, event_times):
+        
+    def run(self, **kwargs):
         """Fit + evaluate the sklearn LinearRegression baseline on one already-built
         dataset variant (from pair_input_output's n_datasets output) and write its
         predictions/results into the standard per-seed result directory, exactly
@@ -27,23 +27,23 @@ class LinRegress():
         :param event_times: parsed data/event_timestamps.txt rows (list of [onset, ...])
         """
 
-        X_train = np.array([instance.flatten() for instance in train])
-        X_test = np.array([instance.flatten() for instance in test])
+        X_train = np.array([instance.flatten() for instance in kwargs["train"]])
+        X_test = np.array([instance.flatten() for instance in kwargs["test"]])
 
         lr_model = LinearRegression()
-        lr_model.fit(X_train, targets_train)
+        lr_model.fit(X_train, kwargs["targets_train"])
         y_pred = lr_model.predict(X_test)
 
-        os.makedirs(result_path, exist_ok=True)
-        np.savetxt(f"{result_path}/predictions.txt", y_pred, delimiter=",")
+        os.makedirs(kwargs["results_path"], exist_ok=True)
+        np.savetxt(f"{kwargs["results_path"]}/predictions.txt", y_pred, delimiter=",")
 
         # Only events whose full onset..peak span is present in this variant's
         # test set (works for the real dataset and any block-partitioned variant).
-        event_times_test = [event for event in event_times if event[0] in targets_test]
+        event_times_test = [event for event in kwargs["event_times"] if event[0] in kwargs["targets_test"]]
 
-        target_times = list(targets_test.keys())
+        target_times = list(kwargs["targets_test"].keys())
         predictions = {target_times[i]: y_pred[i] for i in range(len(y_pred))}
 
-        evaluate(targets_test, predictions, event_times_test, data, path=result_path, display=False)
+        evaluate(kwargs["targets_test"], predictions, event_times_test, kwargs["data"], path=kwargs["results_path"], display=False)
 
-        return y_pred, targets_test
+        return y_pred, kwargs["targets_test"]

@@ -129,6 +129,7 @@ class RoPE(nn.Module):
                  dim_feedforward=64, dropout=0.1, window_size=25):
         super().__init__()
         self.name = "rope"
+        self.type = "champion"
         self.input_layer = nn.Linear(input_size, d_model)
         self.layers = nn.ModuleList([
             RoPEEncoderLayer(d_model, n_heads, window_size, dim_feedforward, dropout)

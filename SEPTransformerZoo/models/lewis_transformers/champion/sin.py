@@ -16,6 +16,7 @@ class Sin(nn.Module):
                  n_encoder_layers=2, dropout=0.1, window_size=25):
         super().__init__()
         self.name = "sin"
+        self.type = "champion"
         self.input_layer = nn.Linear(input_size, dim_val)
         self.register_buffer('pos_encoding', sinusoidal_positional_encoding(window_size, dim_val))
         encoder_layer = nn.TransformerEncoderLayer(
