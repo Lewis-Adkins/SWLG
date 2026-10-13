@@ -1,22 +1,13 @@
 import torch
 import torch.nn as nn
-import math
 
-def sinusoidal_positional_encoding(window_size, dim_val):
-    pe = torch.zeros(window_size, dim_val)
-    position = torch.arange(0, window_size, dtype=torch.float32).unsqueeze(1)
-    div_term = torch.exp(torch.arange(0, dim_val, 2).float() * (-math.log(10000.0) / dim_val))
-    pe[:, 0::2] = torch.sin(position * div_term)
-    pe[:, 1::2] = torch.cos(position * div_term)
-    return pe.unsqueeze(0)  # (1, window_size, dim_val)
-
-
-class M1TransformerSin(nn.Module):
+class Zero(nn.Module):
     def __init__(self, input_size=3, dim_val=32, n_heads=4,
                  n_encoder_layers=2, dropout=0.1, window_size=25):
         super().__init__()
+        self.name = "zero"
         self.input_layer = nn.Linear(input_size, dim_val)
-        self.register_buffer('pos_encoding', sinusoidal_positional_encoding(window_size, dim_val))
+        self.pos_encoding = nn.Parameter(torch.zeros(1, window_size, dim_val))
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=dim_val,
             nhead=n_heads,

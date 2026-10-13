@@ -1,0 +1,17 @@
+# Python 3.12 (AutoGluon supports 3.10-3.13)
+
+# CUDA build of PyTorch - RTX 5070 (Blackwell) needs CUDA 12.8+ wheels.
+# cu128 stops at torch 2.11, so use cu130 (otherwise pip grabs the CPU-only build from PyPI)
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.13.0+cu130  # autogluon.timeseries needs torch<2.14
+
+numpy==2.5.4
+pandas==2.3.3  # autogluon needs pandas<2.4
+scipy==1.18.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+tqdm==4.70.1
+pyyaml==6.0.3
+colorama==0.4.6
+
+autogluon==1.6.3

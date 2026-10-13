@@ -22,6 +22,7 @@ class RoPEAttnLayer(nn.Module):
     ):
         super().__init__()
         assert d_model % n_heads == 0
+  
         self.d_head = d_model // n_heads
         self.inv_sqrt_d_head = self.d_head ** -0.5
 
@@ -108,6 +109,7 @@ class RoPEAttnLayer(nn.Module):
 class RoPEEncoderLayer(nn.Module):
     def __init__(self, d_model, n_heads, max_pos_enc_len, dim_feedforward, dropout=0.1, bias=True):
         super().__init__()
+
         self.attn_layer = RoPEAttnLayer(d_model, n_heads, max_pos_enc_len, dropout, bias)
         self.norm2 = nn.LayerNorm(d_model)
         self.ff = nn.Sequential(
@@ -122,10 +124,11 @@ class RoPEEncoderLayer(nn.Module):
         x = x + self.dropout(self.ff(self.norm2(x)))     # feedforward + residual + norm (added)
         return x
     
-class M1TransformerRoPE(nn.Module):
+class RoPE(nn.Module):
     def __init__(self, input_size=3, d_model=16, n_heads=2, n_encoder_layers=1,
                  dim_feedforward=64, dropout=0.1, window_size=25):
         super().__init__()
+        self.name = "rope"
         self.input_layer = nn.Linear(input_size, d_model)
         self.layers = nn.ModuleList([
             RoPEEncoderLayer(d_model, n_heads, window_size, dim_feedforward, dropout)
