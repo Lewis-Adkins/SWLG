@@ -48,6 +48,7 @@ def mae(targets, predictions, before_log):
     if before_log:
         return np.mean(np.abs(np.exp(targets) - np.exp(predictions)))
     else:
+
         return np.mean(np.abs(targets - predictions))
 
 def pe(targets, predictions):

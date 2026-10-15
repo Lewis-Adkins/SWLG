@@ -11,15 +11,17 @@ from colorama import Fore, Style
 from lib.torres.m1 import pair_input_output
 
 import inspect
-from models.lewis_transformers.baseline.linear_regression import LinRegress
-from models.lewis_transformers.champion.rope import RoPE
-from models.lewis_transformers.champion.sin import Sin
-from models.lewis_transformers.champion.zero import Zero
+from models.linear_regression import LinearRegression
+from models.rope import RoPE
+from models.sin import Sin
+from models.zero import Zero
 
-from models.torres_nns.baseline.persistence import persistence
-from models.torres_nns.baseline.posner import Posner
-from models.torres_nns.champion.nn import NN
-from models.torres_nns.champion.rnn import RNN
+from models.persistence import Persistence
+from models.posner import Posner
+from models.nn import NN
+from models.rnn import RNN
+from models.champion_model import ChampionModel
+from torch import nn
 
 
 class SetUp:
@@ -27,6 +29,7 @@ class SetUp:
 
         self.ERROR_TEXT    = Fore.RED    + "[ERROR]"   + Style.RESET_ALL
         self.PROCESS_TEXT  = Fore.YELLOW + "[PROCESS]" + Style.RESET_ALL
+        self.TRAINING_TEXT = Fore.BLUE + "[TRAINING]" + Style.RESET_ALL
         try:
 
             self.config        = self.get_config()
@@ -89,13 +92,14 @@ class SetUp:
         self.seeds = lines
 
     def get_model(self)-> object:
-        models_folder = Path("models")
-
         for name, obj in inspect.getmembers(sys.modules[__name__]):
             if inspect.isclass(obj):
+
                 if name.lower() == self.config["model"]["type"]:
                     print(f"{self.PROCESS_TEXT} Getting {name} forecasting model...")
-                    return obj
+                    if issubclass(obj, nn.Module):
+                        return ChampionModel(config=self.config, network_cls=obj)
+                    return obj(config=self.config)
     def get_data(self)-> None:
         self.check_data_files()
         self.get_event_indices()
@@ -134,30 +138,25 @@ class SetUp:
             blocks = background + events
             random.shuffle(blocks)
             bootstrap = np.vstack(blocks)
-            np.savetxt(f"{str(path)}/{bn}.csv",bootstrap, fmt = '%s', header = header)
+            np.savetxt(f"{str(path)}/{bn}.csv",bootstrap, fmt = '%s', header = header, comments = "", delimiter=",")
 
     def check_boostrap_data_exists(self)->dict:
 
         data_indices = self.config["training"]["n_datasets"] - 1
         data_path = Path(self.config["admin"]["data_folder_path"])
-        bootstrap_path = data_path / "bootstraps"
+    
+        data_files_check = ['data_'+str(i+1) for i in range(data_indices)]
+        data_files_present = [df.stem for df in data_path.iterdir()]
 
-        if not bootstrap_path.exists():
-            bootstrap_path.mkdir()
-        else:
+        missing_bootstraps = []
 
-            data_files_check = ['data_'+str(i+1) for i in range(data_indices)]
-            data_files_present = [df.stem for df in bootstrap_path.iterdir()]
-
-            missing_bootstraps = []
-
-            for df in data_files_check:
-                if df not in data_files_present:
-                    print(f"{self.PROCESS_TEXT} Creating {df}.csv bootstrap data")
-                    missing_bootstraps.append(df)
+        for df in data_files_check:
+            if df not in data_files_present:
+                print(f"{self.PROCESS_TEXT} Creating {df}.csv bootstrap data")
+                missing_bootstraps.append(df)
                 
 
-            self.block_bootstrap_particle_data(bootstrap_path, missing_bootstraps)
+        self.block_bootstrap_particle_data(data_path, missing_bootstraps)
         
         
 

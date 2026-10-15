@@ -13,5 +13,5 @@ matplotlib==3.11.2
 tqdm==4.70.1
 pyyaml==6.0.3
 colorama==0.4.6
-
+triton-windows==3.7.1.post27
 autogluon==1.6.3

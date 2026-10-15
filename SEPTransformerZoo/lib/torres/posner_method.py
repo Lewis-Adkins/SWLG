@@ -60,7 +60,7 @@ def pair_input_output(electron, proton, prediction_time):
         # Add outputs based on future proton flux
         y.append(proton[t + prediction_time])
 
-    train, targets_train, test, targets_test = train_test_split(x, y, 0.8)
+    train, targets_train, test, targets_test = train_test_split(x, y, 0.8) # ghost number for split connect to config.yaml
     return train, targets_train, test, targets_test
 
 

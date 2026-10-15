@@ -1,8 +1,8 @@
-from keras.callbacks import EarlyStopping
-from keras.layers import Dense, GRU
-from keras.models import load_model, Sequential
-from load_data import *
-from stats import mae, x_axis_error, lag_ln10
+# from keras.callbacks import EarlyStopping
+# from keras.layers import Dense, GRU
+# from keras.models import load_model, Sequential
+from lib.torres.load_data import *
+from lib.torres.stats import mae, x_axis_error, lag_ln10, pe
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
@@ -75,27 +75,27 @@ def pair_input_output(data, use_phase_inputs, prediction_time):
     return np.array(train), np.array(targets_train)[:, 1].astype(np.float64), np.array(test), targets_test
 
 
-def train_model(train, targets_train, algorithm):
-    """
-    Create and train the model.
-    :param train: A numpy array in which each row is an instance
-    :param targets_train: The targets for each training instance
-    :param algorithm: 'regular' or 'rnn'
-    :return: The trained model
-    """
-    model = Sequential()
-    if algorithm == 'regular':
-        model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
-    else:
-        model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
-    model.add(Dense(1))
-    model.compile(loss='mse', optimizer='adam')
-    model.fit(train, targets_train, epochs=1000, verbose=1,
-              callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
-    return model
+# def train_model(train, targets_train, algorithm):
+#     """
+#     Create and train the model.
+#     :param train: A numpy array in which each row is an instance
+#     :param targets_train: The targets for each training instance
+#     :param algorithm: 'regular' or 'rnn'
+#     :return: The trained model
+#     """
+#     model = Sequential()
+#     if algorithm == 'regular':
+#         model.add(Dense(30, input_shape=train.shape[1:], activation='sigmoid'))
+#     else:
+#         model.add(GRU(30, input_shape=train.shape[1:], activation='sigmoid', return_sequences=False))
+#     model.add(Dense(1))
+#     model.compile(loss='mse', optimizer='adam')
+#     model.fit(train, targets_train, epochs=1000, verbose=1,
+#               callbacks=[EarlyStopping(monitor='loss', min_delta=1e-4, patience=20)])
+#     return model
 
 
-def evaluate(targets_test, predictions, event_times, data, path, display):
+def evaluate(targets_test, predictions, event_times, data, path, train_time, display = False):
 
     # First, get electron, high energy electron, and xray from data with timestamps for plots
     times = list(data["time"].values)
@@ -117,6 +117,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
     o2p_lags = []
     o2t_lags = []
     ln10_lags = []
+    pes        = []
     for i, event in enumerate(event_times):
 
         # Get event times
@@ -183,6 +184,7 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
         o2p_lags.append(x_axis_error(targets_o2p, predictions_o2p, False))
         o2t_lags.append(x_axis_error(targets_o2t, predictions_o2t, False))
         ln10_lags.append(lag_ln10(targets_o2p, predictions_o2p))
+        pes.append(pe(targets_o2p, predictions_o2p))
 
     # Output metrics per event
     if path:
@@ -194,101 +196,104 @@ def evaluate(targets_test, predictions, event_times, data, path, display):
         outfile.write(f"Average O2P lag = {np.average(o2p_lags): 0.3f}\n")
         outfile.write(f"Average O2T lag = {np.average(o2t_lags): 0.3f}\n")
         outfile.write(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}\n")
+        outfile.write(f"PE = {np.average(pes): 0.3f}\n")
+        outfile.write(f"Train Time = {train_time}\n")
         outfile.close()
 
+    
     # Output average metrics to standard output
     print(f"Average MAE = {np.average(maes): 0.3f}")
     print(f"Average O2P lag = {np.average(o2p_lags): 0.3f}")
     print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
     print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")
-
-
+    print(f"PE = {np.average(pes): 0.3f}")
+    print(f"Train Time = {train_time}\n")
 def main():
 
-    # Add arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--prediction_time', type=int, required=False,
-                        default=6, help="Number of timesteps ahead to predict")
-    parser.add_argument('-a', '--algorithm', type=str, required=False, default='regular',
-                        choices=['regular', 'rnn'], help="Algorithm to be used for intensity model (regular or RNN)")
-    parser.add_argument('-ph', '--phase_inputs', action='store_true', required=False,
-                        default=False, help="Whether or not to use phase inputs")
-    parser.add_argument('-lm', '--load_model', action='store_true', required=False,
-                        default=False, help="Whether or not to load trained model")
-    parser.add_argument('-lp', '--load_predictions', action='store_true', required=False,
-                        default=False, help="Whether or not to load predictions")
-    parser.add_argument('-p', '--path', type=str, required=False,
-                        default=None, help="Directory to load and store files")
-    parser.add_argument('-d', '--display', action='store_true', required=False, default=False,
-                        help="Whether or not to display event plots")
-    parser.add_argument('-s', '--seed', type=int, required=False, help='Seed for random number generator')
+#     # Add arguments
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('-t', '--prediction_time', type=int, required=False,
+#                         default=6, help="Number of timesteps ahead to predict")
+#     parser.add_argument('-a', '--algorithm', type=str, required=False, default='regular',
+#                         choices=['regular', 'rnn'], help="Algorithm to be used for intensity model (regular or RNN)")
+#     parser.add_argument('-ph', '--phase_inputs', action='store_true', required=False,
+#                         default=False, help="Whether or not to use phase inputs")
+#     parser.add_argument('-lm', '--load_model', action='store_true', required=False,
+#                         default=False, help="Whether or not to load trained model")
+#     parser.add_argument('-lp', '--load_predictions', action='store_true', required=False,
+#                         default=False, help="Whether or not to load predictions")
+#     parser.add_argument('-p', '--path', type=str, required=False,
+#                         default=None, help="Directory to load and store files")
+#     parser.add_argument('-d', '--display', action='store_true', required=False, default=False,
+#                         help="Whether or not to display event plots")
+#     parser.add_argument('-s', '--seed', type=int, required=False, help='Seed for random number generator')
 
-    # Parse arguments
-    args = parser.parse_args()
-    prediction_time = args.prediction_time
-    algorithm = args.algorithm
-    use_phase_inputs = args.phase_inputs
-    load_models = args.load_model
-    load_predictions = args.load_predictions
-    path = args.path
-    display = args.display
-    seed = args.seed
+#     # Parse arguments
+#     args = parser.parse_args()
+#     prediction_time = args.prediction_time
+#     algorithm = args.algorithm
+#     use_phase_inputs = args.phase_inputs
+#     load_models = args.load_model
+#     load_predictions = args.load_predictions
+#     path = args.path
+#     display = args.display
+#     seed = args.seed
 
-    # Pair inputs and outputs, and split into train/test
-    data = pd.read_csv('../Data/data.csv')
-    train, targets_train, test, targets_test = pair_input_output(data, use_phase_inputs, prediction_time)
+#     # Pair inputs and outputs, and split into train/test
+#     data = pd.read_csv('../Data/data.csv')
+#     train, targets_train, test, targets_test = pair_input_output(data, use_phase_inputs, prediction_time)
 
-    # Reshape train/test depending on algorithm
-    if algorithm == 'regular':
-        train = np.array([instance.flatten() for instance in train])
-        test = np.array([instance.flatten() for instance in test])
-    else:
-        train = np.array([instance.T for instance in train])
-        test = np.array([instance.T for instance in test])
+#     # Reshape train/test depending on algorithm
+#     if algorithm == 'regular':
+#         train = np.array([instance.flatten() for instance in train])
+#         test = np.array([instance.flatten() for instance in test])
+#     else:
+#         train = np.array([instance.T for instance in train])
+#         test = np.array([instance.T for instance in test])
 
-    # Either load predictions, load model and get predictions, or train model and get predictions
-    if load_predictions:
-        if path:
-            predictions = load_series(f"{path}/predictions.txt")
-        else:
-            print("No path to load predictions from, exiting program.")
-            exit(0)
-    else:
-        if load_models:
-            if path:
-                model = load_model(f"{path}/model")
-            else:
-                print("No path to load model from, exiting program.")
-                exit(0)
-        else:
-            model = train_model(train, targets_train, algorithm)
-            if path:
-                model.save(f"{path}/model")
+#     # Either load predictions, load model and get predictions, or train model and get predictions
+#     if load_predictions:
+#         if path:
+#             predictions = load_series(f"{path}/predictions.txt")
+#         else:
+#             print("No path to load predictions from, exiting program.")
+#             exit(0)
+#     else:
+#         if load_models:
+#             if path:
+#                 model = load_model(f"{path}/model")
+#             else:
+#                 print("No path to load model from, exiting program.")
+#                 exit(0)
+#         else:
+#             model = train_model(train, targets_train, algorithm)
+#             if path:
+#                 model.save(f"{path}/model")
 
-        # Get and save predictions from model
-        predictions = model.predict(test)
-        predictions = predictions.flatten()
-        if path:
-            write_file(f"{path}/predictions.txt", predictions)
+#         # Get and save predictions from model
+#         predictions = model.predict(test)
+#         predictions = predictions.flatten()
+#         if path:
+#             write_file(f"{path}/predictions.txt", predictions)
 
-    # Load events for evaluation
-    event_file = open('../Data/event_timestamps.txt', 'r')
-    lines = event_file.readlines()
-    event_times = [line.split() for line in lines]
-    event_file.close()
+#     # Load events for evaluation
+#     event_file = open('../Data/event_timestamps.txt', 'r')
+#     lines = event_file.readlines()
+#     event_times = [line.split() for line in lines]
+#     event_file.close()
 
-    # Select only events which are in the test set
-    event_times_test = []
-    first_test_event_time = list(targets_test.keys())[0]
-    for event in event_times:
-        if event[0] >= first_test_event_time:
-            event_times_test.append(event)
+#     # Select only events which are in the test set
+#     event_times_test = []
+#     first_test_event_time = list(targets_test.keys())[0]
+#     for event in event_times:
+#         if event[0] >= first_test_event_time:
+#             event_times_test.append(event)
 
-    # Evaluate predictions
-    target_times = list(targets_test.keys())
-    predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
-    evaluate(targets_test, predictions, event_times_test, data, path, display)
-
+#     # Evaluate predictions
+#     target_times = list(targets_test.keys())
+#     predictions = {target_times[i]: predictions[i] for i in range(len(predictions))}
+#     evaluate(targets_test, predictions, event_times_test, data, path, display)
+    pass
 
 if __name__ == "__main__":
     main()

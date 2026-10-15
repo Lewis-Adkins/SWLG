@@ -1,0 +1,36 @@
+Event 1
+MAE =  0.744
+O2P lag =  11.000
+O2T lag =  11.000
+ln10 lag = -44.000
+
+Event 2
+MAE =  0.503
+O2P lag =  12.000
+O2T lag =  7.000
+ln10 lag =  78.000
+
+Event 3
+MAE =  4.171
+O2P lag =  13.000
+O2T lag =  13.000
+ln10 lag = -2.000
+
+Event 4
+MAE =  0.843
+O2P lag =  11.000
+O2T lag =  10.000
+ln10 lag =  48.000
+
+Event 5
+MAE =  3.366
+O2P lag =  12.000
+O2T lag =  12.000
+ln10 lag =  0.000
+
+Average MAE =  1.926
+Average O2P lag =  11.800
+Average O2T lag =  10.600
+Average ln10 lag =  16.000
+PE = -35.092
+Train Time = 0:00:00.780818

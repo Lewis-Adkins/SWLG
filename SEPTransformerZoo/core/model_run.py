@@ -1,30 +1,31 @@
-import numpy as np
+
+from pathlib import Path
+
 import pandas as pd
 
-from lib.torres.posner_method import pair_input_output as posner_input_output
-from lib.torres.m1 import pair_input_output
 
 class ModelRun:
     def __init__(self, model: object, config: dict):
         self.model  = model
         self.config = config
+        self.train_time = 0
 
     def get_data(self, data_index: int)->pd.DataFrame:
         if data_index == 0:
             self.data = pd.read_csv("data/data.csv")
         else:
-            self.data = pd.read_csv(f"data/bootstrap/data_{data_index}.csv")
+            self.data = pd.read_csv(f"data/data_{data_index}.csv")
+        return self.data
 
+    def create_results_path(self, dataset_id: int, prediction_time: int) -> str:
+        phases_tag   = "phases" if self.config["data"]["use_phases"] else "nophases"
+        results_path = Path(f"results/{self.model.name}/{phases_tag}/dataset_{dataset_id}/t+{prediction_time}")
+        results_path.mkdir(parents=True, exist_ok=True)
+        return str(results_path)
 
-    def pair_input_output(self)-> tuple:
+    def pair_input_output(self)->tuple:
+        return self.model.pair_input_output()
 
-        if self.model.name == "posner":
-            
-            trains, targets_trains, tests, targets_tests = posner_input_output(
-                self.data['electron'], self.data['proton'], self.config['data']['prediciton_time']
-            )
-        else:
-            trains, targets_train, test, targets_test = pair_input_output(
-                self.data, self.config["data"]["use_phases"], self.config['data']['prediciton_time']
-            )
-        return trains, targets_trains, tests, targets_tests
+    def run_model(self,data: pd.DataFrame, prediction_time:float)->None:
+
+            self.model.run()

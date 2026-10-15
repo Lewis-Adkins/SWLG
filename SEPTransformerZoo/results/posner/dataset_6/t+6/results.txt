@@ -1,0 +1,78 @@
+Event 1
+MAE =  2.988
+O2P lag =  0.000
+O2T lag =  0.000
+ln10 lag = -22.000
+
+Event 2
+MAE =  3.054
+O2P lag =  5.000
+O2T lag =  5.000
+ln10 lag =  0.000
+
+Event 3
+MAE =  1.046
+O2P lag =  0.000
+O2T lag =  0.000
+ln10 lag = -3.000
+
+Event 4
+MAE =  1.843
+O2P lag =  22.000
+O2T lag =  23.000
+ln10 lag =  60.000
+
+Event 5
+MAE =  2.688
+O2P lag =  2.000
+O2T lag =  5.000
+ln10 lag =  1.000
+
+Event 6
+MAE =  0.683
+O2P lag =  23.000
+O2T lag =  23.000
+ln10 lag =  0.000
+
+Event 7
+MAE =  1.692
+O2P lag =  23.000
+O2T lag =  23.000
+ln10 lag =  0.000
+
+Event 8
+MAE =  1.598
+O2P lag =  0.000
+O2T lag =  0.000
+ln10 lag = -3.000
+
+Event 9
+MAE =  1.312
+O2P lag =  6.000
+O2T lag =  6.000
+ln10 lag = -8.000
+
+Event 10
+MAE =  0.981
+O2P lag =  4.000
+O2T lag =  4.000
+ln10 lag = -2.000
+
+Event 11
+MAE =  0.827
+O2P lag =  0.000
+O2T lag =  0.000
+ln10 lag = -6.000
+
+Event 12
+MAE =  2.787
+O2P lag =  0.000
+O2T lag =  0.000
+ln10 lag = -5.000
+
+Average MAE =  1.792
+Average O2P lag =  7.083
+Average O2T lag =  7.417
+Average ln10 lag =  1.000
+PE = -6.602
+Train Time = 0:00:29.424137
