@@ -185,18 +185,19 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
         o2t_lags.append(x_axis_error(targets_o2t, predictions_o2t, False))
         ln10_lags.append(lag_ln10(targets_o2p, predictions_o2p))
         pes.append(pe(targets_o2p, predictions_o2p))
+        
 
     # Output metrics per event
     if path:
         outfile = open(f'{path}/results.txt', 'w')
         for i in range(len(event_times)):
             outfile.write(f"Event {i + 1}\nMAE = {maes[i]: 0.3f}\nO2P lag = {o2p_lags[i]: 0.3f}\n"
-                          f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\n\n")
+                          f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\nPE = {pes[i]:0.3f}\n\n")
         outfile.write(f"Average MAE = {np.average(maes): 0.3f}\n")
         outfile.write(f"Average O2P lag = {np.average(o2p_lags): 0.3f}\n")
         outfile.write(f"Average O2T lag = {np.average(o2t_lags): 0.3f}\n")
         outfile.write(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}\n")
-        outfile.write(f"PE = {np.average(pes): 0.3f}\n")
+        outfile.write(f"Average PE = {np.average(pes): 0.3f}\n")
         outfile.write(f"Train Time = {train_time}\n")
         outfile.close()
 
@@ -206,7 +207,7 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
     print(f"Average O2P lag = {np.average(o2p_lags): 0.3f}")
     print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
     print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")
-    print(f"PE = {np.average(pes): 0.3f}")
+    print(f"Average PE = {np.average(pes): 0.3f}")
     print(f"Train Time = {train_time}\n")
 def main():
 

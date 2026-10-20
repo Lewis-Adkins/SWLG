@@ -10,7 +10,7 @@ class LinearRegression(BaselineModel):
     def __init__(self, config:dict):
         super().__init__(config)
         
-        self.name = "linear"
+        self.name = "linearregression"
         self.type = "baseline"
 
 

@@ -48,9 +48,11 @@ class Posner(BaselineModel):
                 electron_t = electron[t]
             x.append([electron_t, np.log(max_rise)])  # log-log of slope
 
-            # Add outputs based on future proton flux
+            # Add outputs based on future proton flux; include timestamps
             y.append([time[t + prediction_time], proton[t + prediction_time]])
 
+        # Split train/test
+        # Note that training targets do not need times, but test targets do for synchronization
         train, targets_train, test, targets_test = self.train_test_split(x, y, self.config["data"]["train_split"])
         targets_test = {target[0]: float(target[1]) for target in targets_test}
 
@@ -138,6 +140,7 @@ class Posner(BaselineModel):
         # Average proton intensity per cell and display and return model
         model = np.array(model)
         num_instances_per_cell = np.array(num_instances_per_cell)
+        # Cells with no training instances stay NaN (same result as plain division, without the 0/0 warning)
         model = np.divide(model, num_instances_per_cell, out=np.full_like(model, np.nan, dtype=np.float64),
                           where=num_instances_per_cell > 0)
         

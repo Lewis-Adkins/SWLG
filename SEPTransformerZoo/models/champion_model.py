@@ -135,10 +135,11 @@ class ChampionModel(BaselineModel):
 
     def new_tracker(self, n_models: int) -> dict:
         return {"best_losses": [float("inf")] * n_models, "patience": [0] * n_models,
-                "best_states": [None] * n_models, "active": [True] * n_models}
+                "best_states": [None] * n_models, "active": [True] * n_models,
+                "train_times": [None] * n_models}
 
     def update_tracker(self, tracker: dict, avg_losses: list[float], params: dict, model_names: list[str],
-                       epoch: int) -> None:
+                       epoch: int, start_time: datetime) -> None:
         for i, loss in enumerate(avg_losses):
             if not tracker["active"][i]:
                 continue
@@ -149,8 +150,9 @@ class ChampionModel(BaselineModel):
                 tracker["patience"][i] += 1
 
             if tracker["patience"][i] >= self.config["training"]["patience"]:
-                print(f"{model_names[i]} converged at epoch {epoch + 1}")
+                tracker["train_times"][i] = datetime.now() - start_time
                 tracker["active"][i] = False
+                print(f"{model_names[i]} converged at epoch {epoch + 1} after {tracker['train_times'][i]}")
 
     def load_best_states(self, models: list[nn.Module], best_states: list[dict | None]) -> None:
         with torch.no_grad():
@@ -161,7 +163,7 @@ class ChampionModel(BaselineModel):
                     param.copy_(state[name])
 
     def train_models(self, models: list[nn.Module], model_names: list[str], train_loader: GPUBatcher,
-                     loss_fn: nn.Module) -> timedelta:
+                     loss_fn: nn.Module) -> list[timedelta]:
         n_models = len(models)
         base_model, params, buffers = self.stack_models(models)
         compute_losses = self.make_compute_losses(base_model, loss_fn)
@@ -176,7 +178,7 @@ class ChampionModel(BaselineModel):
             epoch_start = datetime.now()
             avg_losses  = self.train_epoch(compute_losses, params, buffers, optimizer, train_loader, n_models).tolist()
             epoch_time  = (datetime.now() - epoch_start).total_seconds()
-            self.update_tracker(tracker, avg_losses, params, model_names, epoch)
+            self.update_tracker(tracker, avg_losses, params, model_names, epoch, start_time)
 
             if (epoch + 1) % 10 == 0:
                 for model_name, loss, patience, active in zip(model_names, avg_losses, tracker["patience"], tracker["active"]):
@@ -185,8 +187,12 @@ class ChampionModel(BaselineModel):
                               f"loss {loss:.4f} | epoch time {epoch_time:.1f}s | "
                               f"patience {patience}/{self.config['training']['patience']}")
 
+        # models still active hit n_epochs without converging: they trained for the full run
+        total_time = datetime.now() - start_time
+        train_times = [t if t is not None else total_time for t in tracker["train_times"]]
+
         self.load_best_states(models, tracker["best_states"])
-        return datetime.now() - start_time
+        return train_times
 
     def test_model(self, model: nn.Module, test_loader: GPUBatcher) -> np.ndarray:
         model.eval()
@@ -208,6 +214,14 @@ class ChampionModel(BaselineModel):
         self.record_parameters(model, str(model_path))
         return y_pred
 
+    def get_models_path(self, path: str) -> Path:
+        models_path = Path(path) / "models"
+        models_path.mkdir(parents=True, exist_ok=True)
+        return models_path
+
+    def save_model(self, model: nn.Module, model_name: str, path: str) -> None:
+        torch.save(model.state_dict(), self.get_models_path(path) / f"{model_name}.pt")
+
     def print_training(self, model_names: list[str], prediction_time: int, path: str) -> None:
         dataset = Path(path).parent.name
         phases  = "phases" if self.config["data"]["use_phases"] else "no phases"
@@ -228,9 +242,11 @@ class ChampionModel(BaselineModel):
                 train, targets_train, test, targets_test, seed_indices)
 
             self.print_training(model_names, prediction_time, path)
-            train_time = self.train_models(models, model_names, train_loader, loss_fn)
-
+            train_times = self.train_models(models, model_names, train_loader, loss_fn)
             for model, model_name in zip(models, model_names):
+                self.save_model(model, model_name, path)
+
+            for model, model_name, train_time in zip(models, model_names, train_times):
                 all_predictions.append(self.evaluate_model(model, model_name, train_time, test_loader,
                                                            targets_test, event_times_test, data, path))
         return all_predictions

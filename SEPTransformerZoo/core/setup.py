@@ -89,7 +89,7 @@ class SetUp:
 
         with open(self.config["admin"]["data_folder_path"]+"/seeds.txt","r") as f:
             lines = f.read().split()
-        self.seeds = lines
+        self.seeds = [int(seed) for seed in lines]
 
     def get_model(self)-> object:
         for name, obj in inspect.getmembers(sys.modules[__name__]):
@@ -100,12 +100,36 @@ class SetUp:
                     if issubclass(obj, nn.Module):
                         return ChampionModel(config=self.config, network_cls=obj)
                     return obj(config=self.config)
+                
+    def store_model_types(self)-> dict[str, str]:
+        model_types = {}
+        baselines = []
+        champions  =[] 
+        for name, obj in inspect.getmembers(sys.modules[__name__]):
+            if inspect.isclass(obj):
+                if obj.type == "baseline":
+                    baselines.append(name)
+                else:
+                    champions.append(name)
+
+        model_types["baseline"] = baselines
+        model_types["champion"] = champions
+        return model_types
+     
     def get_data(self)-> None:
         self.check_data_files()
         self.get_event_indices()
         self.get_event_timestamps()
         self.get_particle_data()
+        self.get_seeds()
 
+
+    def get_bootstrap_seed(self, bootstrap_name: str) -> int:
+        bootstrap_number = int(bootstrap_name.split("_")[1])
+        if bootstrap_number > len(self.seeds):
+            print(f"{self.ERROR_TEXT} {bootstrap_name} needs seed {bootstrap_number} but seeds.txt only has {len(self.seeds)}")
+            sys.exit()
+        return self.seeds[bootstrap_number - 1]
 
     def block_bootstrap_particle_data(self, path: Path, bootstrap_names: list[str])-> tuple[np.array, np.array]:
         particle_data_pd = self.particle_data.reset_index()
@@ -115,9 +139,11 @@ class SetUp:
         events = []
         non_background_indicies = np.array([])
 
+        prev_end = 0
         for ei in self.event_indices:
-            event_start  = int(ei[0])
+            event_start  = max(int(ei[0]) - 36, prev_end) # don't pad into the previous event
             event_end    = int(ei[3])
+            prev_end     = event_end
 
             single_event_indicies   = np.arange(event_start, event_end)
             non_background_indicies = np.append(non_background_indicies, single_event_indicies)
@@ -136,7 +162,7 @@ class SetUp:
         
         for bn in bootstrap_names:
             blocks = background + events
-            random.shuffle(blocks)
+            random.Random(self.get_bootstrap_seed(bn)).shuffle(blocks)
             bootstrap = np.vstack(blocks)
             np.savetxt(f"{str(path)}/{bn}.csv",bootstrap, fmt = '%s', header = header, comments = "", delimiter=",")
 
