@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from lib.torres.m1 import evaluate
 import pandas as pd
 from datetime import datetime
 from models.baseline_model import BaselineModel
@@ -24,11 +23,11 @@ class Persistence(BaselineModel):
 
         # Only events whose full onset..peak span is present in this variant's
         # test set (works for the real dataset and any block-partitioned variant).
-        event_times_test = [event for event in event_times if event[0] in targets_tests]
+        event_times_test = self.test_events(event_times, targets_tests)
         target_times = list(targets_tests.keys())
         predictions = {target_times[i]: y_pred[i] for i in range(len(y_pred))}
 
         np.savetxt(f"{path}/predictions.txt", y_pred, fmt='%.7f')
-        evaluate(targets_tests, predictions, event_times_test, data, path=path, train_time=train_time)
+        self.evaluate(targets_tests, predictions, event_times_test, data, path=path, train_time=train_time)
 
         return y_pred

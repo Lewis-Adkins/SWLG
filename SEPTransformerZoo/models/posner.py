@@ -345,7 +345,7 @@ class Posner(BaselineModel):
         y_pred = self.predict(test,model, range_matrix)
         train_time = datetime.now() - start_time
 
-        event_times_test = [event for event in event_times if event[0] in targets_test]
+        event_times_test = self.test_events(event_times, targets_test)
         target_times = list(targets_test.keys())
         predictions = {target_times[i]: y_pred[i] for i in range(len(y_pred))}
 

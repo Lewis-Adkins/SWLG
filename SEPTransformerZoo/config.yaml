@@ -1,5 +1,5 @@
 model:
-  type: sin         # sin | rope | zero | linearregression | persistence | posner | nn | rnn | autogluon
+  type: sin         # sin | rope | zero | linearregression | persistence | posner | nn | rnn | tft | chronos2
   n_encoder_layers: 1      
   dim_val: 16              
   dim_feedforward: 64                                
@@ -12,9 +12,9 @@ training:
   n_seeds: 10                
   models_in_parallel: 10      
   n_datasets: 10              
-  learning_rate: 0.002 #.001
-  n_epochs: 2              
-  batch_size: 256 # real 32
+  learning_rate: 0.001
+  n_epochs: 1
+  batch_size: 512
   num_workers: 8
   patience: 20             
   min_delta: 0.0001
@@ -29,5 +29,6 @@ data:
 
 admin:
   python314_path: ""
-  python312_path: ""   
+  python312_path: ".venv/Scripts/python.exe"   # runs the AutoGluon models (tft, chronos2)   
   data_folder_path: "data"
+  results_folder_path: "results"

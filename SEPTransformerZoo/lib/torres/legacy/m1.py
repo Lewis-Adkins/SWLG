@@ -2,7 +2,7 @@
 # from keras.layers import Dense, GRU
 # from keras.models import load_model, Sequential
 from lib.torres.load_data import *
-from lib.torres.stats import mae, x_axis_error, lag_ln10, pe
+from lib.torres.stats import mae, x_axis_error, lag_ln10, pe, r2, f1_counts
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
@@ -95,7 +95,7 @@ def pair_input_output(data, use_phase_inputs, prediction_time):
 #     return model
 
 
-def evaluate(targets_test, predictions, event_times, data, path, train_time, display = False):
+def evaluate(targets_test, predictions, event_times, data, path, train_time, display = False, save_plots = True):
 
     # First, get electron, high energy electron, and xray from data with timestamps for plots
     times = list(data["time"].values)
@@ -118,6 +118,8 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
     o2t_lags = []
     ln10_lags = []
     pes        = []
+    r2s        = []
+    f1s        = []   # (f1, tp, fp, fn, tn) per event, positive = flux above ln(10) (10 pfu)
     for i, event in enumerate(event_times):
 
         # Get event times
@@ -133,39 +135,41 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
         electron_o2p = slice_dictionary_keys(electron_dict, bg_before_onset, peak)
         electron_high_o2p = slice_dictionary_keys(electron_high_dict, bg_before_onset, peak)
 
-        # Plot event
-        fig, ax = plt.subplots()
-        ax.set_ylabel('ln(Flux (/cc/s/sr))')
-        ax.plot(list(targets_o2p.values()), '-b', label='Actual proton')
-        ax.plot(list(predictions_o2p.values()), '-r', label='Predicted proton')
-        ax.plot(list(electron_o2p.values()), '-m', label='Electron')
-        ax.plot(list(electron_high_o2p.values()), '-y', label='High-energy electron')
-        ax.plot([np.log(10)] * len(targets_o2p.values()), '--k')
+        # Event plot (skipped with save_plots=False, e.g. when only re-scoring saved predictions)
+        if save_plots or display:
+            # Plot event
+            fig, ax = plt.subplots()
+            ax.set_ylabel('ln(Flux (/cc/s/sr))')
+            ax.plot(list(targets_o2p.values()), '-b', label='Actual proton')
+            ax.plot(list(predictions_o2p.values()), '-r', label='Predicted proton')
+            ax.plot(list(electron_o2p.values()), '-m', label='Electron')
+            ax.plot(list(electron_high_o2p.values()), '-y', label='High-energy electron')
+            ax.plot([np.log(10)] * len(targets_o2p.values()), '--k')
 
-        # Set x-axis to timestamps
-        diff = int(ax.get_xticks()[1] - ax.get_xticks()[0])
-        time_labels = [time[time.index('T') + 1: time.index('.')] for time in times_o2p[::diff]]
-        if len(time_labels) == len(ax.get_xticks()) - 2:
-            ax.set_xticks(ax.get_xticks()[1:-1])
-        else:
-            ax.set_xticks(ax.get_xticks()[1:-2])
-        ax.set_xticklabels(time_labels, rotation='vertical')
+            # Set x-axis to timestamps
+            diff = int(ax.get_xticks()[1] - ax.get_xticks()[0])
+            time_labels = [time[time.index('T') + 1: time.index('.')] for time in times_o2p[::diff]]
+            if len(time_labels) == len(ax.get_xticks()) - 2:
+                ax.set_xticks(ax.get_xticks()[1:-1])
+            else:
+                ax.set_xticks(ax.get_xticks()[1:-2])
+            ax.set_xticklabels(time_labels, rotation='vertical')
 
-        # Caption with date
-        date_start = times_o2p[0][:times_o2p[0].index('T')]
-        date_end = times_o2p[-1][:times_o2p[-1].index('T')]
-        if date_start != date_end:
-            ax.set_xlabel(f'Event from {date_start} to {date_end}')
-        else:
-            ax.set_xlabel(f'Event on {date_start}')
+            # Caption with date
+            date_start = times_o2p[0][:times_o2p[0].index('T')]
+            date_end = times_o2p[-1][:times_o2p[-1].index('T')]
+            if date_start != date_end:
+                ax.set_xlabel(f'Event from {date_start} to {date_end}')
+            else:
+                ax.set_xlabel(f'Event on {date_start}')
 
-        fig.legend(loc='upper left', fontsize='x-small', markerscale=0.5)
-        fig.tight_layout()
-        if path:
-            plt.savefig(f'{path}/event{i + 1}.png')
-        if display:
-            plt.show()
-        plt.close()
+            fig.legend(loc='upper left', fontsize='x-small', markerscale=0.5)
+            fig.tight_layout()
+            if path:
+                plt.savefig(f'{path}/event{i + 1}.png')
+            if display:
+                plt.show()
+            plt.close()
 
         # Now remove the 3 hours of background since they are not evaluated
         targets_o2p = slice_dictionary_keys(targets_test, onset, peak)
@@ -185,19 +189,24 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
         o2t_lags.append(x_axis_error(targets_o2t, predictions_o2t, False))
         ln10_lags.append(lag_ln10(targets_o2p, predictions_o2p))
         pes.append(pe(targets_o2p, predictions_o2p))
-        
+        r2s.append(r2(targets_o2p, predictions_o2p))
+        f1s.append(f1_counts(targets_o2p, predictions_o2p))
+
 
     # Output metrics per event
     if path:
         outfile = open(f'{path}/results.txt', 'w')
         for i in range(len(event_times)):
             outfile.write(f"Event {i + 1}\nMAE = {maes[i]: 0.3f}\nO2P lag = {o2p_lags[i]: 0.3f}\n"
-                          f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\nPE = {pes[i]:0.3f}\n\n")
+                          f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\nPE = {pes[i]:0.3f}\nr2 = {r2s[i]: 0.3f}\n"
+                          f"F1 = {f1s[i][0]: 0.3f}\nTP = {f1s[i][1]}\nFP = {f1s[i][2]}\nFN = {f1s[i][3]}\nTN = {f1s[i][4]}\n\n")
         outfile.write(f"Average MAE = {np.average(maes): 0.3f}\n")
         outfile.write(f"Average O2P lag = {np.average(o2p_lags): 0.3f}\n")
         outfile.write(f"Average O2T lag = {np.average(o2t_lags): 0.3f}\n")
         outfile.write(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}\n")
         outfile.write(f"Average PE = {np.average(pes): 0.3f}\n")
+        outfile.write(f"Average r2 = {np.average(r2s): 0.3f}\n")
+        outfile.write(f"Average F1 = {np.nanmean([f[0] for f in f1s]): 0.3f}\n")
         outfile.write(f"Train Time = {train_time}\n")
         outfile.close()
 
@@ -208,6 +217,8 @@ def evaluate(targets_test, predictions, event_times, data, path, train_time, dis
     print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
     print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")
     print(f"Average PE = {np.average(pes): 0.3f}")
+    print(f"Average r2 = {np.average(r2s): 0.3f}")
+    print(f"Average F1 = {np.nanmean([f[0] for f in f1s]): 0.3f}")
     print(f"Train Time = {train_time}\n")
 def main():
 
@@ -241,7 +252,7 @@ def main():
 #     seed = args.seed
 
 #     # Pair inputs and outputs, and split into train/test
-#     data = pd.read_csv('../Data/data.csv')
+#     data = pd.read_csv('../Data/data_0.csv')
 #     train, targets_train, test, targets_test = pair_input_output(data, use_phase_inputs, prediction_time)
 
 #     # Reshape train/test depending on algorithm

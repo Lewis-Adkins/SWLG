@@ -11,7 +11,7 @@ def find_indices():
     # Open the two files, plus a third to output indices for use in multiple_models.py
     event_file = open("p10f10event.dat", "r")
     data_file = open("SO_expave15m.dat", "r")
-    data_df = pd.read_csv("data.csv")
+    data_df = pd.read_csv("data_0.csv")
 
     # Convert each to a list of lines so that indices can be kept track of
     event_lines = event_file.readlines()
@@ -144,7 +144,7 @@ def txt_to_df():
                   pd.Timedelta(1, unit="D"))
     df["time"] = [str(np.datetime64(time)) for time in df["time"]]
 
-    df.to_csv("data.csv", header=True, index=False)
+    df.to_csv("data_0.csv", header=True, index=False)
 
 
 def add_phases():
@@ -156,7 +156,7 @@ def add_phases():
     infile.close()
 
     # Scan through dates in data, finding where each becomes background/rising/falling
-    data = pd.read_csv(open("data.csv"))
+    data = pd.read_csv(open("data_0.csv"))
     dates = data["time"].values
     event_index = 0
     event_phase = 0
@@ -209,7 +209,7 @@ def add_phases():
     data["background"] = background
     data["rising"] = rising
     data["falling"] = falling
-    data.to_csv("data.csv", header=True, index=False)
+    data.to_csv("data_0.csv", header=True, index=False)
 
 
 def main():

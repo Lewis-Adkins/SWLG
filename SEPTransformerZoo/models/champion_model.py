@@ -111,7 +111,10 @@ class ChampionModel(BaselineModel):
             return loss_fn(pred, y)
 
         compute_losses = torch.func.vmap(compute_loss, in_dims=(0, 0, None, None), randomness="different")
-        return torch.compile(compute_losses, mode="reduce-overhead")
+        # dynamic=False: compute_loss is the same function for every model in a run, so after nn/rnn
+        # change shape (phases adds input features) torch.compile would switch to symbolic shapes,
+        # which crashes the transformers' vmapped Linear layers. Static shapes just recompile instead.
+        return torch.compile(compute_losses, mode="reduce-overhead", dynamic=False)
 
     def clip_grad_norm_stacked(self, params: dict, n_models: int, max_norm: float = 1.0) -> None:
         grads   = [p.grad for p in params.values() if p.grad is not None]
@@ -196,7 +199,7 @@ class ChampionModel(BaselineModel):
 
     def test_model(self, model: nn.Module, test_loader: GPUBatcher) -> np.ndarray:
         model.eval()
-        compiled = torch.compile(model, mode="reduce-overhead")
+        compiled = torch.compile(model, mode="reduce-overhead", dynamic=False)
         with torch.no_grad():
             predictions = [compiled(batch["Current_Flux_Data"]).squeeze(-1).clone() for batch in test_loader]
         return torch.cat(predictions).cpu().numpy()
@@ -234,7 +237,7 @@ class ChampionModel(BaselineModel):
             return []
 
         train, targets_train, test, targets_test = self.get_splits(data, prediction_time)
-        event_times_test = [event for event in event_times if event[0] in targets_test]
+        event_times_test = self.test_events(event_times, targets_test)
 
         all_predictions = []
         for seed_indices in seed_groups:

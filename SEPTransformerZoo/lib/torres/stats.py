@@ -9,11 +9,11 @@ Additionally, a function for plotting actual vs. predicted is implemented.
 # from features import sigma
 from sklearn.metrics import confusion_matrix, f1_score
 import matplotlib
-# Force the non-interactive Agg backend -- this is the first module in the
-# torres.m1 import chain to import pyplot, so it's the one place that
+# Force the non-interactive Agg backend -- models/baseline_model.py imports this
+# module before anything imports pyplot, so it's the one place that
 # actually controls backend selection (matplotlib.use() only takes effect
-# before pyplot's first import). Figures here and in torres/m1.py's
-# evaluate() are only ever saved to disk (plt.savefig), never shown
+# before pyplot's first import). Figures here and in PlotStuff.plot_event_forecast
+# (called from BaselineModel.evaluate) are only ever saved to disk (plt.savefig), never shown
 # interactively, and the default TkAgg backend's Figure/Image __del__ hooks
 # crash with "main thread is not in main loop" (harmless but noisy --
 # swallowed by Python's GC) once anything spawns background threads, e.g.
@@ -59,7 +59,19 @@ def pe(targets, predictions):
     :return: The prediction efficiency of the predicted values
     """
     return 1 - (np.mean((predictions - targets)**2) / np.var(targets))
-   
+
+
+def r2(targets, predictions):
+    """
+    Calculates the coefficient of determination of the predictions (equal to pe).
+    :param targets: A list of observed values of the output
+    :param predictions: A list of predicted values of the output
+    :return: 1 - sum of squared residuals / total sum of squares
+    """
+    res = ((targets - predictions)**2).sum()
+    tot = ((targets - targets.mean())**2).sum()
+    return 1 - res/tot
+
 
 def x_axis_error(targets, predictions, before_log, display=False, path=None, event_index=None):
     """
@@ -196,6 +208,25 @@ def tss_f1(targets, predictions):
     # tss = (tp / (tp + fn)) - (fp / (fp + tn))
     f1 = f1_score(targets_bool, predictions_bool)
     return  f1
+
+
+def f1_counts(targets, predictions, threshold=np.log(10)):
+    """
+    Point-by-point classification of one event: a time step is positive if its flux is above the threshold
+    (default ln(10), i.e. the 10 pfu SEP threshold). Like tss_f1 but without printing, and returns the counts.
+    :param targets: A list of observed values of the output
+    :param predictions: A list of predicted values of the output
+    :param threshold: Positive-class threshold, in log flux
+    :return: (f1, tp, fp, fn, tn); f1 is nan if there are no positives in either series
+    """
+    targets_bool = np.asarray(targets) > threshold
+    predictions_bool = np.asarray(predictions) > threshold
+    tp = int(np.sum(targets_bool & predictions_bool))
+    fp = int(np.sum(~targets_bool & predictions_bool))
+    fn = int(np.sum(targets_bool & ~predictions_bool))
+    tn = int(np.sum(~targets_bool & ~predictions_bool))
+    f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else np.nan
+    return f1, tp, fp, fn, tn
 
 
 def calc_feature_importance(estimator, features):

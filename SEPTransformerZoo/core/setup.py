@@ -8,7 +8,6 @@ import os
 
 from colorama import Fore, Style
 
-from lib.torres.m1 import pair_input_output
 
 import inspect
 from models.linear_regression import LinearRegression
@@ -21,7 +20,12 @@ from models.posner import Posner
 from models.nn import NN
 from models.rnn import RNN
 from models.champion_model import ChampionModel
+from lib.utils.events import read_event_timestamps
 from torch import nn
+
+# AutoGluon champions (models/autogluon.py). Only importable under Python 3.12 (.venv), so they are
+# imported inside get_model instead of above; main.py starts that interpreter for them.
+AUTOGLUON_MODELS = ("tft", "chronos2")
 
 
 class SetUp:
@@ -55,7 +59,7 @@ class SetUp:
             sys.exit()
 
         data_files = [df.name for df in  data_folder_path.iterdir()]
-        file_list_check = ["event_timestamps.txt", "data.csv", "event_indices.txt"]
+        file_list_check = ["event_timestamps.txt", "data_0.csv", "event_indices.txt"]
 
         for flc in file_list_check:
             if not flc in data_files:
@@ -65,15 +69,12 @@ class SetUp:
     def get_event_timestamps(self) -> None:
         print(f"{self.PROCESS_TEXT} Reading event timestamps...")
 
-        with open(self.config["admin"]["data_folder_path"] + "/event_timestamps.txt", 'r') as f:
-            lines = f.readlines()
-
-        event_times = [line.split() for line in lines]
-        self.event_timestamps = event_times
+        self.event_timestamps = read_event_timestamps(
+            self.config["admin"]["data_folder_path"] + "/event_timestamps.txt")
 
     def get_particle_data(self) -> None:
         print(f"{self.PROCESS_TEXT} Reading particle data...")
-        self.particle_data = pd.read_csv(self.config["admin"]["data_folder_path"]+"/data.csv")
+        self.particle_data = pd.read_csv(self.config["admin"]["data_folder_path"]+"/data_0.csv")
 
     def get_event_indices(self) -> None:
         print(f"{self.PROCESS_TEXT} Reading event indices...")
@@ -92,6 +93,10 @@ class SetUp:
         self.seeds = [int(seed) for seed in lines]
 
     def get_model(self)-> object:
+        if self.config["model"]["type"] in AUTOGLUON_MODELS:
+            from models.autogluon import MODELS   # needs autogluon, i.e. Python 3.12
+            print(f"{self.PROCESS_TEXT} Getting {self.config['model']['type']} forecasting model...")
+            return MODELS[self.config["model"]["type"]](config=self.config)
         for name, obj in inspect.getmembers(sys.modules[__name__]):
             if inspect.isclass(obj):
 
@@ -156,8 +161,10 @@ class SetUp:
         particle_background_indicies = np.nonzero(~np.isin(particle_indices, non_background_indicies))
         background                   = particle_data_np[particle_background_indicies]
 
-        n_blocks = int((background.shape[0])**(1/3)) # https://hal.science/hal-03472199/document - optimal block size proportional to n^1/3, n = size of data
-        background = np.array_split(background, n_blocks) 
+        # https://hal.science/hal-03472199/document - optimal block LENGTH proportional to n^(1/3), n = size of the whole dataset.
+        # So each background block is ~n^(1/3) rows long (~83 rows, ~7 h at 5 min), giving ~6,700 blocks to shuffle.
+        block_size = int(particle_data_np.shape[0] ** (1/3))
+        background = np.split(background, np.arange(block_size, background.shape[0], block_size))   # last block may be shorter
         header = ",".join(particle_data_pd.columns.tolist())
         
         for bn in bootstrap_names:

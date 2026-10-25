@@ -184,7 +184,7 @@ def main():
     display = args.display
 
     # Pair inputs and outputs, and split into train/test
-    data = pd.read_csv('Data/data.csv')
+    data = pd.read_csv('Data/data_0.csv')
     train, targets_train, test, targets_test = pair_input_output(data, prediction_time)
 
     predictions = []

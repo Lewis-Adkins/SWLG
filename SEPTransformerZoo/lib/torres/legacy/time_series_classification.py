@@ -113,7 +113,7 @@ def _test_setup(prediction_time):
     :return: (targets_train, event_times_test)
     """
 
-    data = pd.read_csv("data/data.csv")
+    data = pd.read_csv("data/data_0.csv")
     trains, targets_trains, tests, targets_tests = pair_input_output(data, False, prediction_time)
     targets_train = targets_trains[0]
 

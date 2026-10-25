@@ -357,7 +357,7 @@ def main():
     display = args.display
 
     # Load data
-    data = pd.read_csv("../Data/data.csv")
+    data = pd.read_csv("../Data/data_0.csv")
     timestamps = list(data["time"].values)  # This is used for verifying that time series are synchronized
     electron = data["electron"].values
     proton = data["proton"].values
