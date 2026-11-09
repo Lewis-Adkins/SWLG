@@ -6,3 +6,6 @@
 *.pt
 *.txt
 *.csv
+
+# Allow figures in photos/ (overrides the *.png rule above)
+!photos/**
