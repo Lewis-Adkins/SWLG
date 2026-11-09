@@ -9,6 +9,10 @@ Pipeline entry point. Each stage reads what the previous one wrote to disk, so a
     python main.py analyze                  # bootstrap CSVs + per-event prediction database (after ALL training is done)
     python main.py plot [--show]            # histograms, per-event true vs pred, best-model counts
     python main.py all [--show]             # setup -> train -> analyze -> plot in one go
+    python main.py rescore [--models nn,sin]
+                                            # rewrite results.txt from saved predictions.txt (new metric, no retraining)
+    python main.py photos [--bootstraps 1,2]     # default: every bootstrap dataset
+                                            # data plots -> photos/: flux series, every event, bootstrap datasets
 
 run_parallel.ps1 runs setup once, then one `train --datasets <group>` window per group; run analyze and
 plot after every window has finished.
@@ -26,17 +30,18 @@ from core.analysis import Analysis
 from core.analysis import load_prediction_database, run_plots
 from core.plotstuff import PlotStuff
 from core.analysis import run_results_analysis, build_prediction_database, save_prediction_database
+from core.rescore import rescore_results
 
 BASELINES = ["linearregression", "posner", "persistence"]
-CHAMPIONS = ["sin", "rope", "zero", "rnn", "nn"]
+CHAMPIONS = ["sin", "nn"] #, "rope", "zero", "rnn", "nn"] # 
 AUTOGLUON = list(AUTOGLUON_MODELS)   # tft, chronos2: champions too, but trained under Python 3.12
-ALL_MODELS = BASELINES + CHAMPIONS + AUTOGLUON
+ALL_MODELS = BASELINES + CHAMPIONS #+ AUTOGLUON
 
 
 # ---------- setup ----------
 
-def stage_setup(setup: SetUp) -> None:
-    setup.check_boostrap_data_exists()   # creates any missing data_1.csv ... data_{n-1}.csv
+def stage_setup(setup: SetUp, recreate: bool = False) -> None:
+    setup.check_boostrap_data_exists(recreate)   # creates any missing data_1.csv ... data_{n-1}.csv (all of them if recreate)
     Path(setup.config["admin"]["results_folder_path"]).mkdir(parents=True, exist_ok=True)
 
 
@@ -155,6 +160,22 @@ def stage_plot(setup: SetUp, show: bool) -> None:
     run_plots(a, PlotStuff(a, show=show), load_prediction_database(a))
 
 
+def stage_rescore(setup: SetUp, model_spec: str | None) -> None:
+    # Rewrite every results.txt from its saved predictions.txt (core/rescore.py); run analyze and plot afterwards
+    rescore_results(setup.config, setup.event_timestamps, parse_models(model_spec))
+
+
+def stage_photos(setup: SetUp, bootstraps: str, out_dir: str) -> None:
+    # Input-data plots (no results needed): whole flux series, every event, bootstrap datasets -> photos/
+    data_folder = setup.config["admin"]["data_folder_path"]
+    plots = PlotStuff()
+    print(f"{setup.PROCESS_TEXT} Plotting data overview to {out_dir}/...")
+    plots.plot_flux_series(data_folder, out_dir)
+    plots.plot_events(data_folder, out_dir)
+    which = None if bootstraps == "all" else tuple(int(k) for k in bootstraps.split(","))
+    plots.plot_bootstrap_series(data_folder, out_dir, which)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     stages = parser.add_subparsers(dest="stage", required=True)
@@ -165,11 +186,17 @@ def main():
     stages.add_parser("analyze", help="bootstrap CSVs + per-event prediction database")
     plot = stages.add_parser("plot", help="histograms, per-event true vs pred, best-model counts")
     plot.add_argument("--show", action="store_true", help="open the histogram booklet window")
+    rescore = stages.add_parser("rescore", help="rewrite results.txt from saved predictions.txt (no retraining)")
+    rescore.add_argument("--models", help=f"e.g. nn,sin (default: all of {','.join(ALL_MODELS)})")
+    photos = stages.add_parser("photos", help="data plots: flux series, every event, bootstrap datasets")
+    photos.add_argument("--bootstraps", default="all", help="which bootstrap datasets to plot, e.g. 1,2 (default: all)")
+    photos.add_argument("--out", default="photos", help="output folder (default: photos)")
     everything = stages.add_parser("all", help="setup -> train -> analyze -> plot")
     everything.add_argument("--show", action="store_true", help="open the histogram booklet window")
     args = parser.parse_args()
 
     setup = SetUp()
+    stage_setup(setup, recreate=True)   # rebuild data_1.csv ... data_9.csv with the new block size
     if args.stage in ("setup", "train", "all"):
         stage_setup(setup)          # train also makes sure the datasets exist
     if args.stage in ("train", "all"):
@@ -178,6 +205,10 @@ def main():
         stage_analyze(setup)
     if args.stage in ("plot", "all"):
         stage_plot(setup, show=args.show)
+    if args.stage == "rescore":
+        stage_rescore(setup, args.models)
+    if args.stage == "photos":
+        stage_photos(setup, args.bootstraps, args.out)
 
 
 if __name__ == "__main__":

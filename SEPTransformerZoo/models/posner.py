@@ -143,7 +143,8 @@ class Posner(BaselineModel):
         # Cells with no training instances stay NaN (same result as plain division, without the 0/0 warning)
         model = np.divide(model, num_instances_per_cell, out=np.full_like(model, np.nan, dtype=np.float64),
                           where=num_instances_per_cell > 0)
-        
+        model = self.fill_empty_cells(model)
+
         # Plot model
         plt.imshow(model)
         plt.title("Forecasting Matrix")
@@ -160,6 +161,26 @@ class Posner(BaselineModel):
 
         return model, range_matrix
 
+
+    @staticmethod
+    def fill_empty_cells(model: np.ndarray) -> np.ndarray:
+        """
+        Give every cell with no training instances the proton intensity of the nearest cell that has some
+        (distance in cell units; ties averaged), so every cell can predict, as Torres intends with the input
+        clipping. Without this, empty cells predict NaN on some bootstrap datasets.
+        :param model: 2D array of mean proton intensity per cell, NaN where a cell had no training instances
+        :return: The same matrix with no NaN cells
+        """
+        filled = ~np.isnan(model)
+        if filled.all() or not filled.any():
+            return model
+        rows, cols = np.nonzero(filled)
+        out = model.copy()
+        for i, j in zip(*np.nonzero(~filled)):
+            dist = np.hypot(rows - i, cols - j)
+            nearest = dist == dist.min()
+            out[i, j] = model[rows[nearest], cols[nearest]].mean()
+        return out
 
     def predict(self,test, model, range_matrix):
         """

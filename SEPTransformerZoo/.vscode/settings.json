@@ -1,3 +1,16 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+
+    // Pylance speed-ups
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "python.analysis.indexing": false,
+    "python.analysis.exclude": [
+        "**/.venv",
+        "**/results",
+        "**/results_backup",
+        "**/data",
+        "**/photos",
+        "**/__pycache__",
+        "**/.git"
+    ]
 }

@@ -108,6 +108,7 @@ class BaselineModel:
 
         # Begin evaluating events
         maes       = []
+        mses       = []
         o2p_lags   = []
         o2t_lags   = []
         ln10_lags  = []
@@ -148,6 +149,7 @@ class BaselineModel:
 
             # Calculate stats
             maes.append(mae(targets_o2p, predictions_o2p, False))
+            mses.append(mse(targets_o2p, predictions_o2p))
             o2p_lags.append(x_axis_error(targets_o2p, predictions_o2p, False))
             o2t_lags.append(x_axis_error(targets_o2t, predictions_o2t, False))
             ln10_lags.append(lag_ln10(targets_o2p, predictions_o2p))
@@ -159,10 +161,11 @@ class BaselineModel:
         if path:
             outfile = open(f'{path}/results.txt', 'w')
             for i in range(len(event_times)):
-                outfile.write(f"Event {i + 1}\nMAE = {maes[i]: 0.3f}\nO2P lag = {o2p_lags[i]: 0.3f}\n"
+                outfile.write(f"Event {i + 1}\nMAE = {maes[i]: 0.3f}\nMSE = {mses[i]: 0.3f}\nO2P lag = {o2p_lags[i]: 0.3f}\n"
                             f"O2T lag = {o2t_lags[i]: 0.3f}\nln10 lag = {ln10_lags[i]: 0.3f}\nPE = {pes[i]:0.3f}\nr2 = {r2s[i]: 0.3f}\n"
                             f"F1 = {f1s[i][0]: 0.3f}\nTP = {f1s[i][1]}\nFP = {f1s[i][2]}\nFN = {f1s[i][3]}\nTN = {f1s[i][4]}\n\n")
             outfile.write(f"Average MAE = {np.average(maes): 0.3f}\n")
+            outfile.write(f"Average MSE = {np.average(mses): 0.3f}\n")
             outfile.write(f"Average O2P lag = {np.average(o2p_lags): 0.3f}\n")
             outfile.write(f"Average O2T lag = {np.average(o2t_lags): 0.3f}\n")
             outfile.write(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}\n")
@@ -175,6 +178,7 @@ class BaselineModel:
         
         # Output average metrics to standard output
         print(f"Average MAE = {np.average(maes): 0.3f}")
+        print(f"Average MSE = {np.average(mses): 0.3f}")
         print(f"Average O2P lag = {np.average(o2p_lags): 0.3f}")
         print(f"Average O2T lag = {np.average(o2t_lags): 0.3f}")
         print(f"Average ln10 lag = {np.average(ln10_lags): 0.3f}")

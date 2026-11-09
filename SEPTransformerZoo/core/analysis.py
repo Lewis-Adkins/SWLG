@@ -1,5 +1,6 @@
 from pathlib import Path
 import pickle
+import shutil
 import pandas as pd
 import numpy as np
 import re
@@ -15,7 +16,7 @@ class Analysis:
         self.champion_names        = ['nn', 'rnn', 'rope', 'sin', 'zero', 'tft', 'chronos2']
         self.baseline_h0           = 'persistence' # TODO read from config?
         self.model_names_w_results = self.get_model_names_w_results()
-        self.desired_results_metrics       = ['MAE', 'O2P lag', 'O2T lag', 'ln10 lag', 'PE', 'F1']
+        self.desired_results_metrics       = ['MAE', 'MSE', 'O2P lag', 'O2T lag', 'ln10 lag', 'PE', 'F1']
         self.phases                = ['phases', 'nophases']
         self.file_type             = ['results', 'predictions']
         self.times                 = ['t+6', 't+12']
@@ -23,10 +24,11 @@ class Analysis:
         self.true_protons          = self.get_true_protons()
         self.significance_level    = significance_level
         self.results_metrics       = self.desired_results_metrics                    # "Average ..." lines of results.txt
-        self.event_metrics         = ['MAE', 'O2P lag', 'O2T lag', 'ln10 lag', 'PE', 'F1']  # "Event i" blocks (r2 = PE per event)
+        self.event_metrics         = ['MAE', 'MSE', 'O2P lag', 'O2T lag', 'ln10 lag', 'PE', 'F1']  # "Event i" blocks (r2 = PE per event)
         # The one metric table: what "best" means (lowest, highest, closest to 0) and each metric's plot folder.
         self.metric_info = {
             'MAE':        {'best': 'min',  'folder': 'mae'},
+            'MSE':        {'best': 'min',  'folder': 'mse'},
             'O2P lag':    {'best': 'zero', 'folder': 'o2p'},
             'O2T lag':    {'best': 'zero', 'folder': 'o2t'},
             'ln10 lag':   {'best': 'zero', 'folder': 'ln10lag'},
@@ -72,12 +74,12 @@ class Analysis:
         path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=index, float_format=float_format)
 
-    def save_test_csv(self, df: pd.DataFrame, name: str) -> None:
+    def save_test_csv(self, test_table: pd.DataFrame, test_name: str) -> None:
         # Hypothesis test tables (all champion x baseline pairs in one file):
         # results/metrics_analysis/<name>_<event_avg|events>.csv. %.6g so small p-values are not rounded to 0.
-        path = self.results_folder / 'metrics_analysis' / f'{name}_{self.bootstrap_mode}.csv'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(path, index=False, float_format='%.6g')
+        test_path = self.results_folder / 'metrics_analysis' / f'{test_name}_{self.bootstrap_mode}.csv'
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_table.to_csv(test_path, index=False, float_format='%.6g')
 
     def get_model_names_w_results(self)-> list[str]:
         known = set(self.baseline_names + self.champion_names)
@@ -252,16 +254,6 @@ class Analysis:
         return read_event_timestamps(str(Path("data") / "event_timestamps.txt"))
 
     def get_true_protons(self)-> dict[str, dict[str, dict[str, np.ndarray]]]:
-        # true_protons[t][ds][e] = the true protons of event e in dataset ds, onset -> peak, shape (n_e,).
-        # Also sets self.event_slices[t][ds][e], that event's rows within the dataset's test predictions.
-        # Keys: ds = 'dataset_3', e = 'e22' (line 22 of event_timestamps.txt).
-        #
-        # Test rows mirror BaselineModel.pair_input_output: samples t in range(24, len - h), split
-        # 80/20 on samples, so the test targets are the last n_test rows.
-        # Events are found by timestamp, not event_indices.txt: those indices are for data_0 only,
-        # and each bootstrap dataset shuffles the events to different rows. Same rule as evaluate():
-        # an event counts if its onset is in the test targets, and is scored from onset to peak.
-        # Events that are never in a test split (training data in every dataset) don't appear.
         files = sorted(Path("data").glob("data_*.csv"), key=lambda f: int(f.stem.split('_')[1]))
         frames = {f"dataset_{f.stem.split('_')[1]}": pd.read_csv(f, usecols=["time", "proton"]) for f in files}
         events = self.get_event_timestamps()
@@ -419,7 +411,7 @@ class Analysis:
         return tuple(mean_estimates)
 
 
-    def get_mean_bootstrap_estimates(self,estimate_data:tuple[pd.DataFrame]):
+    def get_mean_bootstrap_estimates(self,estimate_data:tuple[pd.DataFrame], save: bool = True):
         bootstrap_mean_estimates = []
         for ed in estimate_data:
             bootstrap_means = pd.DataFrame([])
@@ -436,12 +428,13 @@ class Analysis:
 
 
 
-            self.save_csv(bootstrap_means, 'mean_bootstrap_estimates')
+            if save:
+                self.save_csv(bootstrap_means, 'mean_bootstrap_estimates')
 
             bootstrap_mean_estimates.append(bootstrap_means)
         return tuple(bootstrap_mean_estimates)           
 
-    def get_bootstrap_mean_diffs(self,estimate_data:tuple[pd.DataFrame], mean_data:tuple[pd.DataFrame])->tuple[pd.DataFrame]:
+    def get_bootstrap_mean_diffs(self,estimate_data:tuple[pd.DataFrame], mean_data:tuple[pd.DataFrame], save: bool = True)->tuple[pd.DataFrame]:
         means_diff = []
 
         for ed, md  in zip(estimate_data, mean_data):
@@ -453,11 +446,14 @@ class Analysis:
                         filtered_mean = md[np.logical_and.reduce([md[k] == row[k] for k in self.bootstrap_keys])][dm].item()
                         bootstrap_mean_diffs.loc[index,f'{dm}'] = row[dm] - filtered_mean
 
-            self.save_csv(bootstrap_mean_diffs, 'bootstrap_mean_diffs')
+            if save:
+                self.save_csv(bootstrap_mean_diffs, 'bootstrap_mean_diffs')
             means_diff.append(bootstrap_mean_diffs)
         return tuple(means_diff)
 
     def get_standard_error(self, mean_diff: np.array) -> float:
+        mean_diff = np.asarray(mean_diff, dtype=float)
+        mean_diff = mean_diff[~np.isnan(mean_diff)]   # missing estimates (e.g. an undefined PE) don't count in B
         B = len(mean_diff)
         if B < 2:
             return np.nan  # undefined with fewer than 2 bootstrap samples
@@ -466,7 +462,8 @@ class Analysis:
     def get_standard_bias(self, mean_diff: np.array)-> float:
         return np.sqrt((mean_diff**2).sum() / len(mean_diff))
 
-    def get_bootstrap_standard_error(self,mean_diff_data: tuple[pd.DataFrame])->tuple[pd.DataFrame]:
+    def get_bootstrap_standard_error(self,mean_diff_data: tuple[pd.DataFrame], save: bool = True)->tuple[pd.DataFrame]:
+            std_errors = []
             for mdd in mean_diff_data:
                 bootstrap_std_error = pd.DataFrame([])
                 for dm in self.desired_results_metrics:
@@ -476,7 +473,10 @@ class Analysis:
 
                     for mc in missing_columns:
                         bootstrap_std_error = pd.concat([bootstrap_std_error ,standard_errors[mc]], axis=1)
-                self.save_csv(bootstrap_std_error, 'bootstrap_standard_errors')
+                if save:
+                    self.save_csv(bootstrap_std_error, 'bootstrap_standard_errors')
+                std_errors.append(bootstrap_std_error)
+            return tuple(std_errors)
 
     def get_bootstrap_standard_bias(self,mean_diff_data: tuple[pd.DataFrame])->tuple[pd.DataFrame]:
             for mdd in mean_diff_data:
@@ -552,63 +552,166 @@ class Analysis:
 
 
 
-    def paired_groups(self, baseline_df: pd.DataFrame, champion_df: pd.DataFrame):
+    def champion_baseline_pairs(self, baseline_table: pd.DataFrame, champion_table: pd.DataFrame):
         # Every (champion, baseline) pair, matched on every bootstrap key except the model: (phases, t[, event]).
-        # Yields (champion, baseline, {match key: value}, champion rows, baseline rows).
-        match_keys = [k for k in self.bootstrap_keys if k != 'model_type']
-        base_groups = dict(list(baseline_df.groupby(['model_type'] + match_keys)))
-        baselines = baseline_df['model_type'].unique()
-        for keys, champ in champion_df.groupby(['model_type'] + match_keys):
-            model, group = keys[0], keys[1:]
-            for bl in baselines:
-                base = base_groups.get((bl, *group))
-                if base is not None:
-                    yield model, bl, dict(zip(match_keys, group)), champ, base
+        # Yields (champion name, baseline name, {match key: value}, champion rows, baseline rows).
+        match_keys = [key for key in self.bootstrap_keys if key != 'model_type']
+        baseline_rows_by_group = dict(list(baseline_table.groupby(['model_type'] + match_keys)))
+        baseline_names = baseline_table['model_type'].unique()
+        for group_key, champion_rows in champion_table.groupby(['model_type'] + match_keys):
+            champion_name, match_values = group_key[0], group_key[1:]
+            for baseline_name in baseline_names:
+                baseline_rows = baseline_rows_by_group.get((baseline_name, *match_values))
+                if baseline_rows is not None:
+                    yield champion_name, baseline_name, dict(zip(match_keys, match_values)), champion_rows, baseline_rows
 
-    def mean_t(self, y_base: np.ndarray, y_champ: np.ndarray, best: str) -> dict[str, float]:
-        # One-sided Welch t-test (no equal-variance assumption) that the champion's mean is better.
-        #   best 'min':  HA: mean(champion) < mean(baseline)
-        #   best 'zero': HA: mean(|champion|) < mean(|baseline|)   (distance of the lag from 0)
-        #   best 'max':  HA: mean(champion) > mean(baseline)
-        # t = (better side) / sqrt(s_b^2/n_b + s_c^2/n_c), so a large positive t favours the champion.
-        # df = (s_b^2/n_b + s_c^2/n_c)^2 / ((s_b^2/n_b)^2/(n_b-1) + (s_c^2/n_c)^2/(n_c-1)), p = P(T_df >= t)
-        if best == 'zero':
-            y_base, y_champ = np.abs(y_base), np.abs(y_champ)
-        n1, n2 = len(y_base), len(y_champ)
-        out = {'n_baseline': n1, 'n_champion': n2, 'mean_baseline': np.nan, 'mean_champion': np.nan,
-               'std_err': np.nan, 't_stat': np.nan, 'df': np.nan, 'p_value': np.nan}
-        if n1 < 2 or n2 < 2:
-            return out
-        m1, m2 = y_base.mean(), y_champ.mean()
-        v1, v2 = y_base.var(ddof=1) / n1, y_champ.var(ddof=1) / n2
-        se = np.sqrt(v1 + v2)
-        out.update(mean_baseline=m1, mean_champion=m2, std_err=se)
-        if se == 0:
-            return out
-        df = (v1 + v2) ** 2 / (v1 ** 2 / (n1 - 1) + v2 ** 2 / (n2 - 1))
-        t_stat = (m2 - m1) / se if best == 'max' else (m1 - m2) / se
-        out.update(t_stat=t_stat, df=df, p_value=t.sf(t_stat, df))
-        return out
+    def welch_t_stat(self, baseline_mean: float, baseline_std_error: float, baseline_n: int,
+                     champion_mean: float, champion_std_error: float, champion_n: int,
+                     best_direction: str) -> dict[str, float]:
 
-    def perform_mean_test(self, mean_estimates: tuple[pd.DataFrame]) -> pd.DataFrame:
-        # Is the champion's mean better than the baseline's? Direction per metric from self.metric_info['best'].
-        # mean_estimates = (baseline, champion) bootstrap estimates from get_mean_estimates.
-        baseline_est, champion_est = mean_estimates
-        hypotheses = {'min':  'mean(champion) < mean(baseline)',
-                      'zero': 'mean(|champion|) < mean(|baseline|)',
-                      'max':  'mean(champion) > mean(baseline)'}
-        rows = []
-        for model, bl, group, champ, base in self.paired_groups(baseline_est, champion_est):
-            for dm in self.desired_results_metrics:
-                best = self.metric_info[dm]['best']
-                res = self.mean_t(base[dm].dropna().to_numpy(), champ[dm].dropna().to_numpy(), best)
-                rows.append({'model_type': model, 'baseline': bl, **group, 'metric': dm,
-                             'h_a': hypotheses[best], **res})
+        test_result = {'n_baseline': baseline_n, 'n_champion': champion_n,
+                       'mean_baseline': baseline_mean, 'mean_champion': champion_mean,
+                       'std_error_of_difference': np.nan, 't_stat': np.nan, 'df': np.nan, 'p_value': np.nan}
+        if baseline_n < 2 or champion_n < 2 or np.isnan(baseline_std_error) or np.isnan(champion_std_error):
+            return test_result
+        
+        baseline_mean_variance = baseline_std_error ** 2 / baseline_n    # s_b^2 / n_b
+        champion_mean_variance = champion_std_error ** 2 / champion_n    # s_c^2 / n_c
+        std_error_of_difference = np.sqrt(baseline_mean_variance + champion_mean_variance)
+        test_result['std_error_of_difference'] = std_error_of_difference
 
-        mean_test = pd.DataFrame(rows)
-        mean_test['reject_h0'] = mean_test['p_value'] < self.significance_level
-        self.save_test_csv(mean_test, 'mean_test')   # -> metrics_analysis/mean_test_<mode>.csv
-        return mean_test
+        if std_error_of_difference == 0:
+            return test_result
+        
+        degrees_of_freedom = (baseline_mean_variance + champion_mean_variance) ** 2 / (
+            baseline_mean_variance ** 2 / (baseline_n - 1) + champion_mean_variance ** 2 / (champion_n - 1))
+        
+        if best_direction == 'max':
+            t_stat = (champion_mean - baseline_mean) / std_error_of_difference
+        else:
+            t_stat = (baseline_mean - champion_mean) / std_error_of_difference
+
+        test_result.update(t_stat=t_stat, df=degrees_of_freedom, p_value=t.sf(t_stat, degrees_of_freedom))
+        
+        return test_result
+
+    def perform_welch_test(self, mean_estimates: tuple[pd.DataFrame], mean_of_bootstrap_estimates: tuple[pd.DataFrame],
+                           std_err: tuple[pd.DataFrame]) -> pd.DataFrame:
+
+        lag_metrics = [metric for metric in self.desired_results_metrics if self.metric_info[metric]['best'] == 'zero']
+
+        abs_lag_estimates = tuple(estimates.assign(**{metric: estimates[metric].abs() for metric in lag_metrics})
+                                  for estimates in mean_estimates)
+        
+        abs_lag_bootstrap_means = self.get_mean_bootstrap_estimates(abs_lag_estimates, save=False)
+
+        abs_lag_std_errors = self.get_bootstrap_standard_error(
+            self.get_bootstrap_mean_diffs(abs_lag_estimates, abs_lag_bootstrap_means, save=False), save=False)
+
+        # One summary row per bootstrap group: mean, standard error and B for every metric (|lag| for the lags).
+        # B = estimates that aren't missing, the same ones get_standard_error uses.
+        group_summaries = []
+
+        for estimates, bootstrap_means, std_errors, lag_bootstrap_means, lag_std_errors in zip(
+                mean_estimates, mean_of_bootstrap_estimates, std_err, abs_lag_bootstrap_means, abs_lag_std_errors):
+            
+            summary_means = bootstrap_means.set_index(self.bootstrap_keys)
+            summary_means[lag_metrics] = lag_bootstrap_means.set_index(self.bootstrap_keys)[lag_metrics]
+            summary_std_errors = std_errors.set_index(self.bootstrap_keys)
+            summary_std_errors[lag_metrics] = lag_std_errors.set_index(self.bootstrap_keys)[lag_metrics]
+            estimate_counts = estimates.groupby(self.bootstrap_keys)[self.desired_results_metrics].count()
+
+            group_summaries.append(summary_means.join(summary_std_errors, rsuffix='_se')
+                                   .join(estimate_counts, rsuffix='_B').reset_index())
+            
+        baseline_summary, champion_summary = group_summaries
+
+        alternative_hypotheses = {'min':  'mean(champion) < mean(baseline)',
+                                  'zero': 'mean(|champion|) < mean(|baseline|)',
+                                  'max':  'mean(champion) > mean(baseline)'}
+        test_rows = []
+
+        for champion_name, baseline_name, match_values, champion_rows, baseline_rows in \
+                self.champion_baseline_pairs(baseline_summary, champion_summary):
+            
+            baseline_row, champion_row = baseline_rows.iloc[0], champion_rows.iloc[0]
+
+            for metric in self.desired_results_metrics:
+                best_direction = self.metric_info[metric]['best']
+                test_result = self.welch_t_stat(
+                    baseline_row[metric], baseline_row[f'{metric}_se'], int(baseline_row[f'{metric}_B']),
+                    champion_row[metric], champion_row[f'{metric}_se'], int(champion_row[f'{metric}_B']),
+                    best_direction)
+                
+                test_rows.append({'model_type': champion_name, 'baseline': baseline_name, **match_values,
+                                  'metric': metric, 'h_a': alternative_hypotheses[best_direction], **test_result})
+
+        welch_test = pd.DataFrame(test_rows)
+        welch_test['reject_h0'] = welch_test['p_value'] < self.significance_level
+        self.save_test_csv(welch_test, 'welch_test')   # -> metrics_analysis/welch_test_<mode>.csv
+        return welch_test
+
+    def get_levene_samples(self, median_diff_data: tuple[pd.DataFrame]) -> tuple[pd.DataFrame]:
+        # Levene's test steps 1-4 (lecture notes p.195), from get_bootstrap_median_diffs (steps 1-2: theta_i - median):
+        #   (3) take |theta_i - median|
+        #   (4) for a group with an odd number of estimates, remove one zero (the median itself)
+        # Same rows as median_diff_data; the removed value becomes NaN.
+        levene_samples = []
+        for median_diffs in median_diff_data:
+            abs_median_diffs = median_diffs.copy()
+            for metric in self.desired_results_metrics:
+                abs_median_diffs[metric] = abs_median_diffs[metric].abs()
+                for _, group_abs_diffs in abs_median_diffs.groupby(self.bootstrap_keys)[metric]:
+                    group_abs_diffs = group_abs_diffs.dropna()
+                    if len(group_abs_diffs) % 2 != 0:
+                        # the smallest |theta_i - median| is the zero
+                        abs_median_diffs.loc[group_abs_diffs.idxmin(), metric] = np.nan
+            levene_samples.append(abs_median_diffs)
+        return tuple(levene_samples)
+
+    def levene_pooled_t_stat(self, baseline_abs_diffs: np.ndarray, champion_abs_diffs: np.ndarray) -> dict[str, float]:
+        # Levene's test step 5 (lecture notes p.195): pooled two-sample t-test on the |theta_i - median| samples, one-sided.
+        #   H0: var(champion) >= var(baseline)   vs   HA: var(champion) < var(baseline)
+        # A smaller variance means a smaller mean |theta_i - median|, so HA is mean(champion) < mean(baseline).
+        #   s_p^2 = ((n_b - 1) s_b^2 + (n_c - 1) s_c^2) / (n_b + n_c - 2),  s from get_standard_error
+        #   t = (mean_b - mean_c) / (s_p * sqrt(1/n_b + 1/n_c)),  df = n_b + n_c - 2,  p = P(T_df >= t)
+        baseline_n, champion_n = len(baseline_abs_diffs), len(champion_abs_diffs)
+        test_result = {'n_baseline': baseline_n, 'n_champion': champion_n, 'mean_baseline': np.nan, 'mean_champion': np.nan,
+                       'pooled_std': np.nan, 't_stat': np.nan, 'df': np.nan, 'p_value': np.nan}
+        if baseline_n < 2 or champion_n < 2:
+            return test_result   # no variance estimate for a group this small
+        baseline_mean, champion_mean = baseline_abs_diffs.mean(), champion_abs_diffs.mean()
+        baseline_std_error = self.get_standard_error(baseline_abs_diffs - baseline_mean)
+        champion_std_error = self.get_standard_error(champion_abs_diffs - champion_mean)
+        degrees_of_freedom = baseline_n + champion_n - 2
+        pooled_std = np.sqrt(((baseline_n - 1) * baseline_std_error ** 2
+                              + (champion_n - 1) * champion_std_error ** 2) / degrees_of_freedom)
+        test_result.update(mean_baseline=baseline_mean, mean_champion=champion_mean, pooled_std=pooled_std,
+                           df=degrees_of_freedom)
+        if pooled_std == 0:
+            return test_result
+        t_stat = (baseline_mean - champion_mean) / (pooled_std * np.sqrt(1 / baseline_n + 1 / champion_n))
+        test_result.update(t_stat=t_stat, p_value=t.sf(t_stat, degrees_of_freedom))
+        return test_result
+
+    def perform_levene_test(self, median_diff_data: tuple[pd.DataFrame]) -> pd.DataFrame:
+        # Is the champion's spread smaller than the baseline's? HA: var(champion) < var(baseline), for every
+        # champion x baseline pair, metric and bootstrap group (raw values, also for the lags: this is about spread).
+        # median_diff_data = (baseline, champion) from get_bootstrap_median_diffs.
+        baseline_levene_samples, champion_levene_samples = self.get_levene_samples(median_diff_data)
+        test_rows = []
+        for champion_name, baseline_name, match_values, champion_rows, baseline_rows in \
+                self.champion_baseline_pairs(baseline_levene_samples, champion_levene_samples):
+            for metric in self.desired_results_metrics:
+                test_result = self.levene_pooled_t_stat(baseline_rows[metric].dropna().to_numpy(),
+                                                        champion_rows[metric].dropna().to_numpy())
+                test_rows.append({'model_type': champion_name, 'baseline': baseline_name, **match_values,
+                                  'metric': metric, 'h_a': 'var(champion) < var(baseline)', **test_result})
+
+        levene_test = pd.DataFrame(test_rows)
+        levene_test['reject_h0'] = levene_test['p_value'] < self.significance_level
+        self.save_test_csv(levene_test, 'levene_test')   # -> metrics_analysis/levene_test_<mode>.csv
+        return levene_test
 
 
 # ---------- pipeline stages (called from main.py: analyze / plot) ----------
@@ -630,7 +733,8 @@ def run_bootstrap(a: Analysis, bootstrap_data: tuple[pd.DataFrame]) -> tuple[pd.
     # Hypothesis test: is each champion's mean better than each baseline's? Only on the per-dataset values;
     # per event there are too few baseline samples (1-4) for a meaningful test.
     if a.bootstrap_mode == 'event_avg':
-        a.perform_mean_test(mean_estimates)
+        a.perform_welch_test(mean_estimates, mean_of_bootstrap_estimates, std_err)
+        a.perform_levene_test(median_diffs)
 
     return mean_estimates
 
@@ -700,6 +804,153 @@ def load_mean_estimates(a: Analysis) -> tuple[pd.DataFrame]:
     return tuple(pd.read_csv(a.csv_path(group, 'mean_estimates')) for group in ('baseline', 'champion'))
 
 
+# ---------- F1 per alerting approach (Torres's W / EW / EAW / AW) ----------
+# Port of lib/torres/legacy/time_series_classification.py, but on each dataset's own test targets (row positions
+# within the test set, events found by timestamp) instead of data_0's absolute rows, so it works for every
+# bootstrap dataset. An alert starts when the prediction reaches ln(10) and ends alert_window steps after the
+# last prediction above it. The approaches differ in two switches:
+#   extend: keep extending the alert while another prediction >= ln(10) comes within alert_window (EW, EAW)
+#           instead of only while the predictions stay above ln(10) step after step (W, AW)
+#   early:  the alert starts when the forecast is issued (target time - t) instead of at the target time (EAW, AW)
+# TP = event whose threshold crossing falls inside an alert, FN = event with none, FP = alert that touches no event.
+F1_APPROACHES = {'W': (False, False), 'EW': (True, False), 'EAW': (True, True), 'AW': (False, True)}
+ALERT_WINDOWS = [1, 3, 6, 9, 12, 24, 72]   # 5-min steps: 5 min to 6 h
+
+
+def alert_periods(predictions: np.ndarray, prediction_time: int, extend: bool, early: bool,
+                  alert_window: int) -> np.ndarray:
+    # (start, end) test positions of every alert, following _count_tp_fp_fn in the legacy code
+    above = predictions >= np.log(10)
+    n = len(predictions)
+    above_positions = np.flatnonzero(above)
+    alerts = []
+    t = above_positions[0] if len(above_positions) else n
+    while t < n:
+        start = t - prediction_time if early else t
+        if extend:
+            window = above[t + 1: t + alert_window + 1]
+            while window.any():
+                t += len(window) - int(np.argmax(window[::-1]))   # jump to the last prediction above ln(10)
+                window = above[t + 1: t + alert_window + 1]
+        else:
+            while t + 1 < n and above[t + 1]:
+                t += 1
+        alerts.append((start, t + alert_window))
+        t += alert_window + (prediction_time if early else 0)
+        # skip ahead to the next prediction above ln(10)
+        later = np.searchsorted(above_positions, t)
+        t = above_positions[later] if later < len(above_positions) else n
+    return np.array(alerts, dtype=float).reshape(-1, 2)
+
+
+def alert_f1(alerts: np.ndarray, events: np.ndarray) -> tuple[int, int, int, float]:
+    # TP / FP / FN / F1 of the alerts against the events, each an (n, 2) array of (start, end) test positions
+    # (events: threshold crossing, event end)
+    if len(events) == 0:
+        return 0, len(alerts), 0, 0.0
+    a0, a1 = alerts[:, :1], alerts[:, 1:]
+    e0, e1 = events[:, 0][None, :], events[:, 1][None, :]
+    catches_start = (a0 < e0) & (e0 < a1)                     # alert covers the threshold crossing
+    inside = (e0 < a0) & (a1 < e1)                            # alert entirely inside the event
+    covers_end = (e0 < a0) & (a0 < e1) & (e1 < a1)            # alert overlaps the end only
+    tp = int(catches_start.any(axis=0).sum())
+    fn = len(events) - tp
+    fp = int((~(catches_start | inside | covers_end).any(axis=1)).sum())
+    f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
+    return tp, fp, fn, f1
+
+
+def compute_f1_approaches(a: Analysis, data_folder: str, event_timestamps: list[list[str]]) -> pd.DataFrame:
+    # F1 of every run's saved predictions.txt for each approach and alert window.
+    # One row per (model_type, phases, dataset, t, run, approach, alert_window) -> metrics_analysis/csv/f1_approaches.csv
+    rows = []
+    prediction_files = sorted(a.results_folder.rglob('predictions.txt'))
+    for dataset_name in sorted({parse_results_path(a.results_folder, f)['dataset'] for f in prediction_files}):
+        data = pd.read_csv(Path(data_folder) / f"data_{dataset_name.split('_')[1]}.csv", usecols=['time'])
+        for prediction_time in (6, 12):
+            n_test = n_test_samples(len(data), prediction_time, a.train_split)
+            test_times = data['time'].iloc[len(data) - n_test:].tolist()
+            position = {time: i for i, time in enumerate(test_times)}
+            events = np.array([(position[threshold], position.get(end, n_test - 1))
+                               for _, threshold, _, end in event_timestamps if threshold in position], dtype=float)
+            events = events.reshape(-1, 2)
+            for f in prediction_files:
+                info = parse_results_path(a.results_folder, f)
+                if info['dataset'] != dataset_name or info['t'] != f't+{prediction_time}':
+                    continue
+                predictions = np.loadtxt(f)
+                if len(predictions) != n_test:
+                    print(f"  SKIPPED {f}: {len(predictions)} predictions for {n_test} test targets")
+                    continue
+                for approach, (extend, early) in F1_APPROACHES.items():
+                    for alert_window in ALERT_WINDOWS:
+                        tp, fp, fn, f1 = alert_f1(alert_periods(predictions, prediction_time, extend, early,
+                                                                alert_window), events)
+                        rows.append(dict(model_type=info['model_type'], phases=info['phases'], dataset=dataset_name,
+                                         t=info['t'], run=info.get('model_name', 'run'), approach=approach,
+                                         alert_window=alert_window, TP=tp, FP=fp, FN=fn, F1=f1))
+        print(f"  F1 approaches: {dataset_name} done")
+    table = pd.DataFrame(rows)
+    out = a.results_folder / a.metrics_folder / 'f1_approaches.csv'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False, float_format='%.4f')
+    return table
+
+
+# ---------- RQ2: warning time per event (causal alert rule) ----------
+# An operator never knows the crossing time, so alerts are built only from the forecasts: Torres's EAW alert
+# (alert_periods with extend=True, early=True) starts at the ISSUE time of the first forecast >= 10 pfu and stays on
+# while another forecast >= 10 pfu comes within RQ2_ALERT_WINDOW steps. Scored afterwards against the true crossing c:
+#   hit     = an alert is on at c (inclusive, so an alert starting exactly at c counts, e.g. persistence)
+#   warning = (c - alert start) x 5 min; a missed event gets warning 0
+RQ2_ALERT_WINDOW = 12   # 1 h
+
+
+def compute_warning_times(a: Analysis, data_folder: str, event_timestamps: list[list[str]],
+                          models: list[str] | None = None, check_alignment: bool = True,
+                          save: bool = True) -> pd.DataFrame:
+    # One row per (model_type, phases, dataset, t, run, event) -> metrics_analysis/csv/rq2_warning_times.csv
+    # check_alignment: skip predictions.txt files older than their data_<k>.csv (the bootstrap data was regenerated
+    # after those runs, so their test rows no longer line up with the events).
+    rows, skipped = [], 0
+    prediction_files = sorted(a.results_folder.rglob('predictions.txt'))
+    cache = {}
+    for f in prediction_files:
+        info = parse_results_path(a.results_folder, f)
+        if models is not None and info['model_type'] not in models:
+            continue
+        h = int(info['t'].split('+')[1])
+        data_path = Path(data_folder) / f"data_{info['dataset'].split('_')[1]}.csv"
+        if check_alignment and f.stat().st_mtime < data_path.stat().st_mtime:
+            skipped += 1
+            continue
+        key = (info['dataset'], h)
+        if key not in cache:
+            times = pd.read_csv(data_path, usecols=['time'])['time']
+            n_test = n_test_samples(len(times), h, a.train_split)
+            position = {time: i for i, time in enumerate(times.iloc[len(times) - n_test:])}
+            cache[key] = (n_test, [(i, position[thr]) for i, (_, thr, _, _) in enumerate(event_timestamps)
+                                   if thr in position])
+        n_test, events = cache[key]
+        predictions = np.loadtxt(f)
+        if len(predictions) != n_test or not events:
+            continue
+        alerts = alert_periods(predictions, h, extend=True, early=True, alert_window=RQ2_ALERT_WINDOW)
+        for event, c in events:
+            on = alerts[(alerts[:, 0] <= c) & (c <= alerts[:, 1])] if len(alerts) else alerts
+            rows.append(dict(model_type=info['model_type'], phases=info['phases'], dataset=info['dataset'],
+                             t=info['t'], run=info.get('model_name', 'run'), event=event + 1, hit=bool(len(on)),
+                             warning_min=float((c - on[:, 0].min()) * 5) if len(on) else 0.0))
+    if skipped:
+        print(f"  RQ2 warning times: skipped {skipped} prediction files older than their data file (re-train them)")
+    table = pd.DataFrame(rows)
+    if save:
+        out = a.results_folder / a.metrics_folder / 'rq2_warning_times.csv'
+        out.parent.mkdir(parents=True, exist_ok=True)
+        table.to_csv(out, index=False)
+    return table
+
+
 def run_plots(a: Analysis, plots: PlotStuff, bb: tuple[dict]) -> None:
     # Histograms per dataset -> results/metrics_analysis/hists/<phases>/<metric>/events_avg.png
     a.set_bootstrap_mode('event_avg')
@@ -710,8 +961,39 @@ def run_plots(a: Analysis, plots: PlotStuff, bb: tuple[dict]) -> None:
     a.set_bootstrap_mode('event_avg')
     # Train time per model -> results/metrics_analysis/hists/<phases>/training_time.png
     plots.plot_train_time(pd.read_csv(a.results_folder / a.metrics_folder / 'train_time.csv'))
-    # Reject / don't-reject grid per champion -> results/metrics_analysis/hypothesis_grids/<champion>.png
-    plots.plot_hypothesis_grid(pd.read_csv(a.results_folder / 'metrics_analysis' / 'mean_test_event_avg.csv'))
+    # MAE / MSE box plots and bars of the bootstrap means (+- bootstrap standard error)
+    # -> results/metrics_analysis/hists/<phases>/mae_mse_boxplot.png, mae_mse_bars.png
+    plots.plot_mae_mse(load_mean_estimates(a),
+                       tuple(pd.read_csv(a.csv_path(group, 'mean_bootstrap_estimates')) for group in ('baseline', 'champion')),
+                       tuple(pd.read_csv(a.csv_path(group, 'bootstrap_standard_errors')) for group in ('baseline', 'champion')))
+    # RQ1 summary figures in AGU print style (heatmap, box plots, volcano vs persistence)
+    # -> SWLG-Paper/figs/results/rq1/rq1_<heatmap|box|volcano>_<phases>.pdf (+ .png previews, rq1_tests_<phases>.csv)
+    paper_rq1 = Path(r'C:\Users\Lewis\Documents\SWLG-Paper\figs\results\rq1')
+    for phases in a.phases:
+        plots.plot_rq1_heatmap(load_mean_estimates(a), phases=phases, out_dir=paper_rq1)
+        plots.plot_rq1_box(load_mean_estimates(a), phases=phases, out_dir=paper_rq1)
+        plots.plot_rq1_volcano(load_mean_estimates(a), phases=phases, out_dir=paper_rq1)
+    # PNG copies inside the repo so the Research Questions.md preview can show them (VS Code only loads images
+    # from inside the workspace) -> results/metrics_analysis/rq1/
+    repo_rq1 = a.results_folder / 'metrics_analysis' / 'rq1'
+    repo_rq1.mkdir(parents=True, exist_ok=True)
+    for png in paper_rq1.glob('rq1_*.png'):
+        shutil.copy2(png, repo_rq1 / png.name)
+    # RQ2: share of events warned >= R ahead vs assumed response time R
+    # -> metrics_analysis/csv/rq2_warning_times.csv, SWLG-Paper/figs/results/rq2/rq2_warning_<phases>.pdf (+ .png),
+    #    PNG copy in results/metrics_analysis/rq2/
+    warning_times = compute_warning_times(a, 'data', read_event_timestamps(str(Path('data') / 'event_timestamps.txt')))
+    paper_rq2 = Path(r'C:\Users\Lewis\Documents\SWLG-Paper\figs\results\rq2')
+    repo_rq2 = a.results_folder / 'metrics_analysis' / 'rq2'
+    repo_rq2.mkdir(parents=True, exist_ok=True)
+    for phases in a.phases:
+        if (warning_times['phases'] == phases).any():
+            plots.plot_rq2_warning(warning_times, phases=phases, out_dir=paper_rq2)
+    for png in paper_rq2.glob('rq2_*.png'):
+        shutil.copy2(png, repo_rq2 / png.name)
+    # Reject / don't-reject grids per champion -> results/metrics_analysis/hypothesis_grids/<welch|levene>/<champion>.png
+    plots.plot_welch_grids(pd.read_csv(a.results_folder / 'metrics_analysis' / 'welch_test_event_avg.csv'))
+    plots.plot_levene_grids(pd.read_csv(a.results_folder / 'metrics_analysis' / 'levene_test_event_avg.csv'))
     # Per-event true vs pred + best-model counts -> results/true_vs_pred/
     plots.plot_true_vs_pred_events(bb)
 

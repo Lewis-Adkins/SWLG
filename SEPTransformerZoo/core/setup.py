@@ -25,7 +25,7 @@ from torch import nn
 
 # AutoGluon champions (models/autogluon.py). Only importable under Python 3.12 (.venv), so they are
 # imported inside get_model instead of above; main.py starts that interpreter for them.
-AUTOGLUON_MODELS = ("tft", "chronos2")
+AUTOGLUON_MODELS = ( "chronos2") # ("tft", "chronos2")
 
 
 class SetUp:
@@ -135,12 +135,46 @@ class SetUp:
             print(f"{self.ERROR_TEXT} {bootstrap_name} needs seed {bootstrap_number} but seeds.txt only has {len(self.seeds)}")
             sys.exit()
         return self.seeds[bootstrap_number - 1]
+    
+# https://www.askpython.com/python-modules/numpy/calculating-auto-covariance-numpy
+    def spectral_density_function(self, M: int | None = None) -> np.ndarray:
+        pass
+
+    def get_autocovriance_of_fluxes(self, k: int) -> np.ndarray:
+        # X: shape (3, N), one row per channel (proton, electron, electron_high). Returns gamma(k) per row, shape (3,)
+        X = self.particle_data[['proton', 'electron', 'electron_high']].to_numpy(dtype=np.float64).T
+        N = X.shape[1]
+        Xs = X.mean(axis=1, keepdims=True)                # (3, 1) mean of each row
+        autoCov = ((X[:, k:] - Xs) * (X[:, :N - k] - Xs)).sum(axis=1)
+
+        return (1 / (N - 1)) * autoCov
+
+    def get_G_and_D_bootstrap_block(self, M: int = 100) -> tuple[np.ndarray, np.ndarray]:
+        # G    = sum_{k=-M}^{M} |k| gamma(k) = 2 * sum_{k=1}^{M} k * gamma(k)
+        # g(0) = sum_{k=-M}^{M} gamma(k)     = gamma(0) + 2 * sum_{k=1}^{M} gamma(k)
+        # D    = 2 * g(0)^2
+        # Each is per channel, shape (3,)
+        G = np.zeros(3)
+        g0 = self.get_autocovriance_of_fluxes(0)
+        for k in range(1, M + 1):
+            gamma_k = self.get_autocovriance_of_fluxes(k)
+            G += 2 * k * gamma_k
+            g0 += 2 * gamma_k
+        D = 2 * g0 ** 2
+        return G, D
+
+    def get_bootstrap_block_size(self, M: int = 100) -> np.ndarray:
+        # b_opt = (2 G^2 / D)^(1/3) * N^(1/3), per channel, rounded up to a whole number of steps
+        G, D = self.get_G_and_D_bootstrap_block(M)
+        N = len(self.particle_data)
+        b_opt = (2 * G ** 2 / D) ** (1 / 3) * N ** (1 / 3)
+        return np.maximum(1, np.ceil(b_opt)).astype(int)
 
     def block_bootstrap_particle_data(self, path: Path, bootstrap_names: list[str])-> tuple[np.array, np.array]:
         particle_data_pd = self.particle_data.reset_index()
         particle_indices = particle_data_pd.index.to_numpy()
         particle_data_np = particle_data_pd.to_numpy()
-        
+
         events = []
         non_background_indicies = np.array([])
 
@@ -161,25 +195,27 @@ class SetUp:
         particle_background_indicies = np.nonzero(~np.isin(particle_indices, non_background_indicies))
         background                   = particle_data_np[particle_background_indicies]
 
-        # https://hal.science/hal-03472199/document - optimal block LENGTH proportional to n^(1/3), n = size of the whole dataset.
-        # So each background block is ~n^(1/3) rows long (~83 rows, ~7 h at 5 min), giving ~6,700 blocks to shuffle.
-        block_size = int(particle_data_np.shape[0] ** (1/3))
+        # Politis-White optimal block length, b = (2G^2/D)^(1/3) * N^(1/3), computed per channel.
+        # One size is needed for all columns, so take the largest (keeps the most correlation inside each block).
+        block_size = int(self.get_bootstrap_block_size().max())
+        print(f"{self.PROCESS_TEXT} Background block size: {block_size} rows")
         background = np.split(background, np.arange(block_size, background.shape[0], block_size))   # last block may be shorter
         header = ",".join(particle_data_pd.columns.tolist())
-        
+
         for bn in bootstrap_names:
             blocks = background + events
             random.Random(self.get_bootstrap_seed(bn)).shuffle(blocks)
             bootstrap = np.vstack(blocks)
             np.savetxt(f"{str(path)}/{bn}.csv",bootstrap, fmt = '%s', header = header, comments = "", delimiter=",")
 
-    def check_boostrap_data_exists(self)->dict:
+    def check_boostrap_data_exists(self, recreate: bool = False)->dict:
+        # recreate=True rebuilds every data_1.csv ... data_{n-1}.csv, even ones that already exist
 
         data_indices = self.config["training"]["n_datasets"] - 1
         data_path = Path(self.config["admin"]["data_folder_path"])
-    
+
         data_files_check = ['data_'+str(i+1) for i in range(data_indices)]
-        data_files_present = [df.stem for df in data_path.iterdir()]
+        data_files_present = [] if recreate else [df.stem for df in data_path.iterdir()]
 
         missing_bootstraps = []
 
@@ -190,6 +226,8 @@ class SetUp:
                 
 
         self.block_bootstrap_particle_data(data_path, missing_bootstraps)
-        
-        
 
+    def flux_correlation(self)-> None:
+        pass
+        
+        

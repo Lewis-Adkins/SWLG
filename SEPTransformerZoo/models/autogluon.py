@@ -20,6 +20,8 @@ Covariates stay NaN past the context window, so no future electron values leak i
 
 No time limit: training stops on early stopping (training.patience) or training.n_epochs, like the torch models.
 """
+import logging
+import shutil
 from datetime import timedelta
 from pathlib import Path
 
@@ -104,6 +106,22 @@ class AutoGluonModel(BaselineModel):
             pass
         return float('nan')
 
+    def keep_weights(self, models_dir: Path, weights_file: Path) -> None:
+        # The trained network's weights (a torch state dict), saved next to the torch models' .pt files
+        state = next(models_dir.rglob("prediction-net-state.pt"), None)
+        if state is not None:
+            shutil.copyfile(state, weights_file)
+
+    def remove_working_folder(self, models_dir: Path) -> None:
+        # AutoGluon saves a copy of the training data (~300 MB) plus logs and pickles for every fit.
+        # Its log file stays open until the handler is closed, which blocks deleting it on Windows.
+        for name in ('autogluon', 'autogluon.timeseries'):
+            log = logging.getLogger(name)
+            for handler in [h for h in log.handlers if isinstance(h, logging.FileHandler)]:
+                handler.close()
+                log.removeHandler(handler)
+        shutil.rmtree(models_dir, ignore_errors=True)
+
     def fit_predict(self, seed: int, train_df: TimeSeriesDataFrame, tuning_df: TimeSeriesDataFrame,
                     test_df: TimeSeriesDataFrame, prediction_time: int, models_dir: str
                     ) -> tuple[np.ndarray, timedelta, int | float]:
@@ -153,13 +171,17 @@ class AutoGluonModel(BaselineModel):
             val = np.random.RandomState(seed).choice(len(train), size=min(VALIDATION_ITEMS, len(train)), replace=False)
             tuning_df = self.to_frame(train[val], rows_train[val], proton, n_future=prediction_time)
 
-            # Fitted predictor, kept like the torch models' .pt files (Chronos-2 only stores a few KB here;
-            # its pretrained weights stay in the shared Hugging Face cache)
-            models_dir = str(Path(path) / "models" / model_name)
+            # AutoGluon's working folder; deleted after this seed, keeping only the trained weights
+            models_dir = Path(path) / "models" / f"{model_name}_autogluon"
             phases = "phases" if self.config["data"]["use_phases"] else "no phases"
             print(f"{self.TRAINING_TEXT} {model_name} | t+{prediction_time} | {Path(path).parent.name} | {phases}")
-            y_pred, train_time, n_parameters = self.fit_predict(seed, train_df, tuning_df, test_df,
-                                                                prediction_time, models_dir)
+            try:
+                y_pred, train_time, n_parameters = self.fit_predict(seed, train_df, tuning_df, test_df,
+                                                                    prediction_time, str(models_dir))
+                if self.trains:
+                    self.keep_weights(models_dir, Path(path) / "models" / f"{model_name}.pt")
+            finally:
+                self.remove_working_folder(models_dir)
 
             print(f"======== Evaluating {model_name} ========")
             np.savetxt(f"{model_path}/predictions.txt", y_pred, fmt='%.7f')

@@ -51,6 +51,15 @@ def mae(targets, predictions, before_log):
 
         return np.mean(np.abs(targets - predictions))
 
+def mse(targets, predictions):
+    """
+    Calculates the MSE of the predictions, in ln(flux) space like mae(..., False).
+    :param targets: A list of observed values of the output
+    :param predictions: A list of predicted values of the output
+    :return: The mean squared error of the predicted values
+    """
+    return np.mean((targets - predictions) ** 2)
+
 def pe(targets, predictions):
     """
     Calculates the prediction efficiency of the predictions.
