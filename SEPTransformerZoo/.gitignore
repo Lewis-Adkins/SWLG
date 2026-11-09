@@ -7,5 +7,8 @@
 *.txt
 *.csv
 
-# Allow figures in photos/ (overrides the *.png rule above)
-!photos/**
+# Allow only the figures used in Research Questions.md (overrides *.png above)
+!results/metrics_analysis/rq1/rq1_heatmap_nophases.png
+!results/metrics_analysis/rq1/rq1_box_nophases.png
+!results/metrics_analysis/rq1/rq1_volcano_nophases.png
+!results/metrics_analysis/rq2/rq2_warning_nophases.png
