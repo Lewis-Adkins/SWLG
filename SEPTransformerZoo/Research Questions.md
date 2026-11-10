@@ -81,6 +81,32 @@
 [[Schrijver 2025]]
 * *Statistical ionosphere models tuned with data from ground-based networks or low Earth orbiting (LEO) satellites can in many cases provide relatively good results for nowcasts or short-term forecasts… However, with increasing lead times more comprehensive physics-based modeling with data assimilation is required.* (§4.3, p18). Data-driven models are strongest at short lead times.
 
+# Why Attention Based Models
+
+[[Vaswani 2023]]
+
+*(RNN) precludes parallelization within training examples, which becomes critical at longer
+sequence lengths, as memory constraints limit batching across examples*
+
+
+[[Cai 2020]]
+
+*Traffic forecasting is a challenging problem due to the complexity of jointly modeling spatio-temporal dependencies
+at different scales. Recently, several hybrid deep learning
+models have been developed to capture such dependencies. These approaches typically utilize convolutional neural
+networks or graph neural networks (GNNs) to model spatial dependency and leverage recurrent neural networks
+(RNNs) to learn temporal dependency. However, RNNs
+are only able to capture sequential information in the time
+series, while being incapable of modeling their periodicity
+(e.g., weekly patterns). Moreover, RNNs are difficult to parallelize, making training and prediction less efficient. In this
+work we propose a novel deep learning architecture called
+Traffic Transformer to capture the continuity and periodicity
+of time series and to model spatial dependency.*
+
+[[Zhao 2026]]
+
+* Classical statistical approaches and early deep-learning architectures (RNNs, LSTMs, CNNs) have achieved notable progress, yet they exhibit structural limitations: recurrent models struggle with long-range dependencies, convolutional models require deep stacking to enlarge receptive fields, and both scale suboptimally to high-dimensional and high-volume data.*
+
 # Motivation
 
 Near-relativistic electrons (SOHO/EPHIN >0.25 and >0.67 MeV) reach L1 within roughly 10–13 min, while >10 MeV protons take roughly 30–65 min (scatter-free, ~1.15 AU field-line path; ~30 min for the fastest protons in the integral, ~65 min at 10 MeV). These are **first-arrival (onset) times** from velocity dispersion, giving a ~20–55 min electron head start on the proton *onset*.
@@ -91,9 +117,9 @@ The forecast target is not the proton onset but the **10 pfu crossing** of the >
 
 ---
 
-# RQ1: Which approach forecasts most accurately?
+# RQ1: Do attention based models provide accurate SEP forecast by minimizing error in flux magnitude and lag?
 
-Do deep-learning models (NN, RNN, RoPE, Sin, Zero Transformers, AutoGluon TFT, Chronos-2) forecast >10 MeV proton flux 30 min (t+6) and 60 min (t+12) ahead more accurately with smaller time lag, than statistical baselines (linear regression, persistence)?
+Do deep-learning models (RoPE, Sin, Zero Transformers, AutoGluon TFT, Chronos-2) forecast >10 MeV proton flux 30 min (t+6) and 60 min (t+12) ahead more accurately with smaller time lag, than statistical baselines,  (linear regression, persistence) and or machine learning models (RNN, NN)?
 
 ## RQ1.1 Accuracy and timing (one-sided Welch t-test, unequal variances)
 
@@ -102,6 +128,8 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 **Higher is better**
 1. $H_0 \text{ F1}: \mu_c \leq \mu_b$ (F1 of the 10 pfu exceedance classification)
 2. $H_0 \text{ PE}: \mu_c \leq \mu_b$ (prediction efficiency)
+
+*Adding Heidke Skill scores*
 
 **Lower is better**
 
@@ -138,7 +166,7 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 
 ---
 
-# RQ2: Is the warning fast enough for operators to safe-mode a satellite?
+# RQ2: What forecast time is sufficient enough for satelite operators to react to SEPs?
 
 What is the end-to-end response time from SEP detection at L1 to satellite safe mode, and do ML forecasts of >10 MeV protons provide warning that exceeds it for GEO and polar LEO satellites? from [[LaNeve 2024]], we have *what* operators did during the 2024 solar maximum but not *how long* each step takes.
 
@@ -184,7 +212,7 @@ $$T_\text{warn} \geq R = T_\text{data acq} + T_\text{alert} + T_\text{decide} + 
 
 ---
 
-# RQ3: Sensitivity to forecast horizon. How far ahead can we forecast?
+# RQ3:  Do transformers maintin forecasting skill at larger time leads compared to competitor models
 
 How does skill decay from t+6 → t+12 → t+18 → t+24 (30 min to 2 h)? At what horizon does each model stop beating persistence?
 
@@ -195,7 +223,7 @@ if models exploit the electron precursor, skill at predicting the 10 pfu crossin
 
 ---
 
-# RQ4: Method design. How much history does a model need?
+# RQ4: Do Transformers increase forecasting skill more as we expand particle time window compared to competitor models
 
 Does a longer input window (6, 12, 25, 48 and 96 steps, i.e. 30 min to 8 h) improve forecasts? Do attention-based models use long context better than NN, RNN and linear regression?
 
@@ -203,7 +231,7 @@ gains level off once the window covers the electron onset. If Transformers don't
 
 ---
 
-# RQ5: Model scaling. Do the models improve with more capacity and tuning?
+# RQ5: Do Transformer forecasting skill increase as we increase model size compared to competitro models?
 
 How sensitive is forecast skill to model size and training hyperparameters?
 
