@@ -1,4 +1,139 @@
-**Overarching question:** Can ML forecasts of >10 MeV protons give satellite operators enough warning to safe-mode before single-event upsets occur?
+**Overarching question:** Can Attnetion base models forecast of >10 MeV protons give satellite operators enough warning to safe-mode before single-event upsets occur?
+
+
+
+
+
+---
+
+# RQ1: Do attention based models provide accurate SEP forecast by minimizing error in flux magnitude and lag?
+
+Do deep-learning models (RoPE, Sin, Zero Transformers, AutoGluon TFT, Chronos-2) forecast >10 MeV proton flux 30 min (t+6) and 60 min (t+12) ahead more accurately with smaller time lag, than statistical baselines,  (linear regression, persistence) and or machine learning models (RNN, NN)?
+
+## RQ1.1 Accuracy and timing (one-sided Welch t-test, unequal variances)
+
+Each null hypothesis says the champion ($c$) is no better than the baseline ($b$). "Better" is higher for skill scores, lower for errors, and closer to zero for lags.
+
+**Higher is better**
+1. $H_0 \text{ F1}: \mu_c \leq \mu_b$ (F1 of the 10 pfu exceedance classification)
+2. $H_0 \text{ PE}: \mu_c \leq \mu_b$ (prediction efficiency)
+
+*Adding Heidke Skill scores*
+
+**Lower is better**
+
+3. $H_0 \text{ MAE}: \mu_c \geq \mu_b$
+4. $H_0 \text{ MSE}: \mu_c \geq \mu_b$
+
+**Closer to zero is better** (timing offset between forecast and observed curve, in 5-min steps)
+
+5. $H_0 \text{ O2P lag}: |\mu_c| \geq |\mu_b|$ (over onset → peak)
+6. $H_0 \text{ O2T lag}: |\mu_c| \geq |\mu_b|$ (over onset → 10 pfu crossing)
+7. $H_0 \text{ ln10 lag}: |\mu_c| \geq |\mu_b|$ (at the 10 pfu crossing)
+
+
+## RQ1.2 Consistency (Levene)
+
+- $H_0: \sigma_\text{champ}^2 \geq \sigma_\text{base}^2$ vs $H_A: \sigma_\text{champ}^2 < \sigma_\text{base}^2$
+- The standard Levene F-test is two-sided, so it cannot test this directional null. Instead, take the absolute deviations $|\theta_i - \text{median}|$ in each group (the Brown–Forsythe form of Levene's test) and compare their means with a **one-sided pooled t-test**. A smaller mean absolute deviation means a smaller variance.
+
+## RQ1 Figures
+
+**Preliminary: all models are 1-epoch runs and are not accucrate to comparing with torres and persistence**
+---
+**Scorecard.** Mean score of each model on each metric over the 10 bootstrap datasets, at 30 and 60 minutes ahead. Cell colour shows the effect size against persistence (Cohen's *d*; blue = better, orange = worse).
+
+![RQ1 heatmap](results/metrics_analysis/rq1/rq1_heatmap_nophases.png)
+
+**Spread across datasets.** Each dot is one bootstrap dataset's score, with box plots showing the median and quartiles for each model and horizon. The vertical lines mark persistence's median, so the plot shows how consistently each model beats or trails it.
+
+![RQ1 box plots](results/metrics_analysis/rq1/rq1_box_nophases.png)
+
+**Significance.** Each point is one model on one metric: x is the effect size against persistence, and y is the Bonferroni-adjusted p-value of the one-sided Welch t-test from RQ1.1 on a −log₁₀ scale. *(The current figure still uses two-sided p-values and needs regenerating to match.)* Points in the upper right are significantly and substantially better than persistence. The numbers behind the plot are in `rq1_tests_nophases.csv`.
+
+![RQ1 volcano](results/metrics_analysis/rq1/rq1_volcano_nophases.png)
+
+---
+
+# RQ2: Given a Fixed Input Time Window of Measured SEP fluxes on SOHO, How Far Ahead Can an Attention Based Model Predict High Energy Protons $>10$ MeV In the Future?
+
+For each event we want to forecast we give our model $2$ hours of particle data to predict the proton flux $30,60$ minutes ahead. what is the difference in forecasting skill between $30,60$ minutes? What if we also included $90,120,150$ ahead? Is this relationship linear? When does it start to resemble persistence?
+
+**Skill against forecast horizon.**
+
+![RQ2 HSS vs horizon (FAKE)](results/metrics_analysis/rq3/rq3_hss_horizon_FAKE.png)
+
+---
+
+# RQ3: How does a Forecast Score for High Energy Protons $>10$ MeV Change As we Increase SEP the context window temporal length of SEPs
+
+The models so far has only ever used a time window of $2$ hours to predict $30,60$ minutes into tehe future. What if instead we allowed it to see $4,6,8,10$ hours into the past for the same $30,60$ minute prediction? 
+
+It has been proposed that a transformer architecture does not struggle with long range dependecies and irregular patterns we expect to see in a dynamical system as space weather.This is because attention models considers all time steps in parallel while RNN and NN processes data sequentially. This causes RNN and NN to forget previous established patterns critical to forecasting SEPs. We hypothesize that a transformer would diverge in performance from all the other models and improve skill score, while a RNN and NN would plataue at a shorter time window.
+
+
+![RQ3 HSS vs window (FAKE)](results/metrics_analysis/rq4/rq4_hss_window_FAKE.png)
+
+---
+
+# RQ4: For a hyperparameterization search of ML and attention models, what is the best configuration for SEP forecasting
+
+How sensitive is forecast skill to model size and training hyperparameters? Transformers has been proposed to scale far better than ML NN and RNN models.
+
+[Xu 2025](https://arxiv.org/html/2501.01394v1)
+
+| Hyperparameter | Current value |
+|---|---|
+| `dim_val` | 16 |
+| `n_encoder_layers` | 1 |
+| `n_heads` | 2 |
+| `learning_rate` | 0.001 |
+
+# RQ5: What SEP forecast time provided by satellite at L1 is sufficient enough for satelite operators to make informed safeguarding decisions? How does it change from aquiring solar storm characyeristic data from other satelittes at different orbits
+What is the end-to-end response time from SEP detection at L1 to satellite safe mode, and do ML forecasts of >10 MeV protons provide warning that exceeds it for GEO and polar LEO satellites? from [[LaNeve 2024]], we have *what* operators did during the 2024 solar maximum but not *how long* each step takes.
+
+## RQ5.1 The response pipeline
+
+
+**Condition for usable warning:**
+
+*Rough sketch of response time*
+$$T_\text{warn} \geq R = T_\text{data acq} + T_\text{alert} + T_\text{decide} + T_\text{uplink} + T_\text{safe}$$
+
+
+-  Depending on if the satellite is in LEO or GEO $R$ could massively differ. $R$ is a distrubution
+
+## RQ5.2 Do champion models clear the threshold more often?
+
+- **Warning time** = $t_{\text{threshold}}$ − $t_\text{issue time of warning}$.
+- **Usable warning** = warning time ≥ $R$.
+- **False alarms.** Warning time on its own rewards over-forecasting: a model that always predicts >10 pfu gets maximum warning on every event. Operators avoid safe mode because lost service costs more than the risk ([[LaNeve 2024]], p19), so warning only counts alongside how often it is wrong.
+  - **False alarm** = an alert period (same rule as the warning time) that does not overlap any observed 10 pfu crossing. Report the **false alarms per year** of test data.
+  - **Main result:** a curve of usable-warning share vs. false alarms per year, traced by sweeping the alert threshold (e.g. 1–100 pfu forecast) for each model
+  - **Single-number comparison:** usable-warning share at a fixed false-alarm rate (e.g. ≤ 1 per year), so models are compared at the same cost to operators.
+- Tests (at the fixed false-alarm rate):
+  - $H_0: \mu_{\text{warn},c} \leq \mu_{\text{warn},b}$ (Welch)
+  - $H_0: p_c \leq p_b$ for the share of events with usable warning (McNemar, paired on the same events)
+- Persistence gives about zero warning by construction, so linear regression is the main reference baseline here.
+- **Context:** compare against NOAA SWPC **proton Warnings**, which are issued *before* an expected crossing ([[Tobiska 2015]]). Use the SWPC archive to get the Warnings' lead times and false-alarm rate for the same 39 events
+
+## RQ5 Figure
+
+*Preliminary:  all other models are 1-epoch runs.*
+---
+[[LaNeve 2024]]
+* *Satellite operators are faced with a plethora of information, limited time for decision making, and limited knowledge of historical space weather relative to their other areas of expertise, causing the need for confident forecasts* (p6–7)
+* Only 10% of satellite operators placed satellites into safe mode after a forecast; 58% increased staff situational awareness (p19).
+* One operator's only "kinetic responses" in their history were *repositioning the satellite to avoid reaching proton thresholds* (p19).
+* One operator avoided safe mode *citing that the loss of services would outweigh the risk of damage, and that the customers almost always opted for continued service* (p19).
+* *the tyranny of distance between operators and equipment* (p24)
+* Operators *identified the need for more accurate, localized, space weather warnings* (p2)
+**Usable warning against response time.** For each assumed satellite response time $R$, the share of SEP events where an alert (a forecast reaching 10 pfu) was issued at least $R$ minutes before the observed crossing. Lines are means over the bootstrap datasets. The grey band marks the electron head start on proton *onset* (~17–55 min); the window to the 10 pfu crossing is usually longer (see Motivation). *(This figure does not yet account for false alarms, see RQ2.2.)*
+
+![RQ2 warning vs response time](results/metrics_analysis/rq2/rq2_warning_nophases.png)
+
+
+# Background
 ---
 [[LaNeve 2024]]
 * *Satellite operators are faced with a plethora of information, limited time for decision making, and limited knowledge of historical space weather relative to their other areas of expertise, causing the need for confident forecasts* (p6–7)
@@ -115,133 +250,6 @@ The forecast target is not the proton onset but the **10 pfu crossing** of the >
 
 - **To do:** measure electron onset (EPHIN >0.25 MeV, first rise above pre-event background) for all 39 events, and use the **electron-onset → 10 pfu crossing** distribution as the available warning window in RQ2 and RQ3.
 
----
-
-# RQ1: Do attention based models provide accurate SEP forecast by minimizing error in flux magnitude and lag?
-
-Do deep-learning models (RoPE, Sin, Zero Transformers, AutoGluon TFT, Chronos-2) forecast >10 MeV proton flux 30 min (t+6) and 60 min (t+12) ahead more accurately with smaller time lag, than statistical baselines,  (linear regression, persistence) and or machine learning models (RNN, NN)?
-
-## RQ1.1 Accuracy and timing (one-sided Welch t-test, unequal variances)
-
-Each null hypothesis says the champion ($c$) is no better than the baseline ($b$). "Better" is higher for skill scores, lower for errors, and closer to zero for lags.
-
-**Higher is better**
-1. $H_0 \text{ F1}: \mu_c \leq \mu_b$ (F1 of the 10 pfu exceedance classification)
-2. $H_0 \text{ PE}: \mu_c \leq \mu_b$ (prediction efficiency)
-
-*Adding Heidke Skill scores*
-
-**Lower is better**
-
-3. $H_0 \text{ MAE}: \mu_c \geq \mu_b$
-4. $H_0 \text{ MSE}: \mu_c \geq \mu_b$
-
-**Closer to zero is better** (timing offset between forecast and observed curve, in 5-min steps)
-
-5. $H_0 \text{ O2P lag}: |\mu_c| \geq |\mu_b|$ (over onset → peak)
-6. $H_0 \text{ O2T lag}: |\mu_c| \geq |\mu_b|$ (over onset → 10 pfu crossing)
-7. $H_0 \text{ ln10 lag}: |\mu_c| \geq |\mu_b|$ (at the 10 pfu crossing)
-
-
-## RQ1.2 Consistency (Levene)
-
-- $H_0: \sigma_\text{champ}^2 \geq \sigma_\text{base}^2$ vs $H_A: \sigma_\text{champ}^2 < \sigma_\text{base}^2$
-- The standard Levene F-test is two-sided, so it cannot test this directional null. Instead, take the absolute deviations $|\theta_i - \text{median}|$ in each group (the Brown–Forsythe form of Levene's test) and compare their means with a **one-sided pooled t-test**. A smaller mean absolute deviation means a smaller variance.
-
-## RQ1 Figures
-
-**Preliminary: all models are 1-epoch runs and are not accucrate to comparing with torres and persistence**
----
-**Scorecard.** Mean score of each model on each metric over the 10 bootstrap datasets, at 30 and 60 minutes ahead. Cell colour shows the effect size against persistence (Cohen's *d*; blue = better, orange = worse).
-
-![RQ1 heatmap](results/metrics_analysis/rq1/rq1_heatmap_nophases.png)
-
-**Spread across datasets.** Each dot is one bootstrap dataset's score, with box plots showing the median and quartiles for each model and horizon. The vertical lines mark persistence's median, so the plot shows how consistently each model beats or trails it.
-
-![RQ1 box plots](results/metrics_analysis/rq1/rq1_box_nophases.png)
-
-**Significance.** Each point is one model on one metric: x is the effect size against persistence, and y is the Bonferroni-adjusted p-value of the one-sided Welch t-test from RQ1.1 on a −log₁₀ scale. *(The current figure still uses two-sided p-values and needs regenerating to match.)* Points in the upper right are significantly and substantially better than persistence. The numbers behind the plot are in `rq1_tests_nophases.csv`.
-
-![RQ1 volcano](results/metrics_analysis/rq1/rq1_volcano_nophases.png)
-
----
-
-# RQ2: What SEP forecast time provided by satellite at L1 is sufficient enough for satelite operators to make informed safeguarding decisions? How does it change from aquiring solar storm characyeristic data from other satelittes at different orbits
-What is the end-to-end response time from SEP detection at L1 to satellite safe mode, and do ML forecasts of >10 MeV protons provide warning that exceeds it for GEO and polar LEO satellites? from [[LaNeve 2024]], we have *what* operators did during the 2024 solar maximum but not *how long* each step takes.
-
-## RQ2.1 The response pipeline
-
-
-**Condition for usable warning:**
-
-*Rough sketch of response time*
-$$T_\text{warn} \geq R = T_\text{data acq} + T_\text{alert} + T_\text{decide} + T_\text{uplink} + T_\text{safe}$$
-
-
--  Depending on if the satellite is in LEO or GEO $R$ could massively differ. $R$ is a distrubution
-
-## RQ2.2 Do champion models clear the threshold more often?
-
-- **Warning time** = $t_{\text{threshold}}$ − $t_\text{issue time of warning}$.
-- **Usable warning** = warning time ≥ $R$.
-- **False alarms.** Warning time on its own rewards over-forecasting: a model that always predicts >10 pfu gets maximum warning on every event. Operators avoid safe mode because lost service costs more than the risk ([[LaNeve 2024]], p19), so warning only counts alongside how often it is wrong.
-  - **False alarm** = an alert period (same rule as the warning time) that does not overlap any observed 10 pfu crossing. Report the **false alarms per year** of test data.
-  - **Main result:** a curve of usable-warning share vs. false alarms per year, traced by sweeping the alert threshold (e.g. 1–100 pfu forecast) for each model
-  - **Single-number comparison:** usable-warning share at a fixed false-alarm rate (e.g. ≤ 1 per year), so models are compared at the same cost to operators.
-- Tests (at the fixed false-alarm rate):
-  - $H_0: \mu_{\text{warn},c} \leq \mu_{\text{warn},b}$ (Welch)
-  - $H_0: p_c \leq p_b$ for the share of events with usable warning (McNemar, paired on the same events)
-- Persistence gives about zero warning by construction, so linear regression is the main reference baseline here.
-- **Context:** compare against NOAA SWPC **proton Warnings**, which are issued *before* an expected crossing ([[Tobiska 2015]]). Use the SWPC archive to get the Warnings' lead times and false-alarm rate for the same 39 events
-
-## RQ2 Figure
-
-*Preliminary:  all other models are 1-epoch runs.*
----
-[[LaNeve 2024]]
-* *Satellite operators are faced with a plethora of information, limited time for decision making, and limited knowledge of historical space weather relative to their other areas of expertise, causing the need for confident forecasts* (p6–7)
-* Only 10% of satellite operators placed satellites into safe mode after a forecast; 58% increased staff situational awareness (p19).
-* One operator's only "kinetic responses" in their history were *repositioning the satellite to avoid reaching proton thresholds* (p19).
-* One operator avoided safe mode *citing that the loss of services would outweigh the risk of damage, and that the customers almost always opted for continued service* (p19).
-* *the tyranny of distance between operators and equipment* (p24)
-* Operators *identified the need for more accurate, localized, space weather warnings* (p2)
-**Usable warning against response time.** For each assumed satellite response time $R$, the share of SEP events where an alert (a forecast reaching 10 pfu) was issued at least $R$ minutes before the observed crossing. Lines are means over the bootstrap datasets. The grey band marks the electron head start on proton *onset* (~17–55 min); the window to the 10 pfu crossing is usually longer (see Motivation). *(This figure does not yet account for false alarms, see RQ2.2.)*
-
-![RQ2 warning vs response time](results/metrics_analysis/rq2/rq2_warning_nophases.png)
-
----
-
-# RQ3:  Do transformers maintain forecasting skill at larger time leads compared to competitor models (Machine Learning, Statistical, Empirical)
-
-How does skill decay from t+6 → t+12 → t+18 → t+24 (30 min to 2 h)? At what horizon does each model stop beating persistence?
-
-if models exploit the electron precursor, skill at predicting the 10 pfu crossing should fall off once the horizon exceeds the **electron-onset → 10 pfu crossing interval** for that event 
-
-**Output:** each model's *maximum useful lead time*, the largest horizon where it still beats persistence significantly.
-
-
----
-
-# RQ4: Do Transformers increase forecasting skill more as we expand particle time window compared to competitor models (Machine Learning, Statistical, Empirical)
-
-Does a longer input window (6, 12, 25, 48 and 96 steps, i.e. 30 min to 8 h) improve forecasts? Do attention-based models use long context better than NN, RNN and linear regression?
-
-gains level off once the window covers the electron onset. If Transformers don't benefit from longer context
-
----
-
-# RQ5: Do Transformer forecasting skill increase as we increase model size compared to competitro models? (Machine Learning, Statistical, Empirical)
-
-How sensitive is forecast skill to model size and training hyperparameters?
-
-| Hyperparameter | Current value |
-|---|---|
-| `dim_val` | 16 |
-| `n_encoder_layers` | 1 |
-| `n_heads` | 2 |
-| `learning_rate` | 0.001 |
-
-
 ## Future work (out of scope)
 
 ### FW1: Do additional characteristics of a solar storm, and observations off the Sun–Earth line, improve forecasts?
@@ -300,5 +308,3 @@ SEU cross-sections depend mostly on higher energies than >10 MeV, so the proton 
 - A different solar cycle, for generalisation.
 - Coupling with or comparing against CCMC physics models (EPREM, iPATH, HESPERIA REleASE).
 - can i use [GMU Super Computing](https://wiki.orc.gmu.edu/mkdocs/Hopper_Quick_Start_Guide/) to run models?
-
-
