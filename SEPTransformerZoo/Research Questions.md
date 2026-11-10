@@ -166,8 +166,7 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 
 ---
 
-# RQ2: What forecast time is sufficient enough for satelite operators to react to SEPs?
-
+# RQ2: What SEP forecast time provided by satellite at L1 is sufficient enough for satelite operators to make informed safeguarding decisions? How does it change from aquiring solar storm characyeristic data from other satelittes at different orbits
 What is the end-to-end response time from SEP detection at L1 to satellite safe mode, and do ML forecasts of >10 MeV protons provide warning that exceeds it for GEO and polar LEO satellites? from [[LaNeve 2024]], we have *what* operators did during the 2024 solar maximum but not *how long* each step takes.
 
 ## RQ2.1 The response pipeline
