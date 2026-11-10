@@ -212,7 +212,7 @@ $$T_\text{warn} \geq R = T_\text{data acq} + T_\text{alert} + T_\text{decide} + 
 
 ---
 
-# RQ3:  Do transformers maintin forecasting skill at larger time leads compared to competitor models
+# RQ3:  Do transformers maintain forecasting skill at larger time leads compared to competitor models (Machine Learning, Statistical, Empirical)
 
 How does skill decay from t+6 → t+12 → t+18 → t+24 (30 min to 2 h)? At what horizon does each model stop beating persistence?
 
@@ -223,7 +223,7 @@ if models exploit the electron precursor, skill at predicting the 10 pfu crossin
 
 ---
 
-# RQ4: Do Transformers increase forecasting skill more as we expand particle time window compared to competitor models
+# RQ4: Do Transformers increase forecasting skill more as we expand particle time window compared to competitor models (Machine Learning, Statistical, Empirical)
 
 Does a longer input window (6, 12, 25, 48 and 96 steps, i.e. 30 min to 8 h) improve forecasts? Do attention-based models use long context better than NN, RNN and linear regression?
 
@@ -231,7 +231,7 @@ gains level off once the window covers the electron onset. If Transformers don't
 
 ---
 
-# RQ5: Do Transformer forecasting skill increase as we increase model size compared to competitro models?
+# RQ5: Do Transformer forecasting skill increase as we increase model size compared to competitro models? (Machine Learning, Statistical, Empirical)
 
 How sensitive is forecast skill to model size and training hyperparameters?
 
@@ -300,3 +300,6 @@ SEU cross-sections depend mostly on higher energies than >10 MeV, so the proton 
 - d_proton (proton derivative) as an extra input.
 - A different solar cycle, for generalisation.
 - Coupling with or comparing against CCMC physics models (EPREM, iPATH, HESPERIA REleASE).
+- can i use [GMU Super Computing](https://wiki.orc.gmu.edu/mkdocs/Hopper_Quick_Start_Guide/) to run models?
+
+
