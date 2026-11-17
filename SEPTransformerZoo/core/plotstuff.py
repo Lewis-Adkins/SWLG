@@ -47,11 +47,6 @@ class PlotStuff:
         'pdf.fonttype': 42, 'ps.fonttype': 42,          # embed TrueType fonts
     }
 
-    @classmethod
-    def agu_apply(cls) -> None:
-        # Set the AGU style globally (inside plotting methods prefer matplotlib.rc_context(self.AGU_RC))
-        matplotlib.rcParams.update(cls.AGU_RC)
-
     @staticmethod
     def agu_panel_label(ax, letter: str, x: float = -0.02, y: float = 1.02) -> None:
         # AGU-style multipart label: bold lowercase letter in parentheses at the top left of the axes
@@ -133,7 +128,7 @@ class PlotStuff:
         # Torres's lag/error diagram for one real event, from a run's saved predictions.txt (event is 1-based,
         # as in results.txt). Saved in the paper figs (evaluation_criteria/equations) as lag_diagram_<model>_t+<T>_<phases>_dataset<N>_run<RR>_event<E>.png
         import matplotlib.pyplot as plt
-        from core.rescore import test_targets
+        from lib.utils.events import test_targets
         from lib.torres.stats import x_axis_error
         from models.baseline_model import BaselineModel   # local: baseline_model imports PlotStuff
 
@@ -330,51 +325,6 @@ class PlotStuff:
         if self.show:
             self._show_booklet(pages, booklet_title)
 
-    @matplotlib.rc_context(PAPER_RC)
-    def plot_single_events_avg(self, mean_estimate_data: tuple[pd.DataFrame], model_type: str = 'sin',
-                               phases: str = 'phases', t: str = 't+6', metric: str = 'MAE',
-                               out_dir: str = r'C:\Users\Lewis\Documents\SWLG-Paper\figs\results\bootstrap') -> None:
-        # One panel of events_avg.png on its own (default: sin, t+6, phases, MAE), drawn the same way.
-        # Needs the 'event_avg' bootstrap mode. Saved as <out_dir>/<metric>_<model>_<t>_<phases>.png
-        bar_c, mean_c, se_c, sb_c, ci_c = self.palette[:5]
-        values = pd.concat(mean_estimate_data, ignore_index=True)
-        means = pd.concat([self._load_summary(p, 'mean_bootstrap_estimates') for p in ('baseline', 'champion')])
-        ses   = pd.concat([self._load_summary(p, 'bootstrap_standard_errors') for p in ('baseline', 'champion')])
-        sbs   = pd.concat([self._load_summary(p, 'bootstrap_standard_bias') for p in ('baseline', 'champion')])
-        key = (model_type, phases, t)
-        v = values[(values['model_type'] == model_type) & (values['phases'] == phases) & (values['t'] == t)][metric].dropna()
-        is_best = self._best_models(means, metric).get((phases, t)) == model_type
-
-        fig = Figure(figsize=(6, 4), dpi=100)
-        ax = fig.subplots()
-        ax.set_title(f'{model_type}, {t} (n={len(v)})')
-        ax.set_ylabel('count')
-        ax.set_xlabel(metric)
-
-        n_bins = max(4, len(np.histogram_bin_edges(v, bins='auto')) - 1)
-        ax.hist(v, bins=n_bins, color=bar_c, edgecolor='white')
-        mean, se, sb = means.loc[key, metric], ses.loc[key, metric], sbs.loc[key, metric]
-        ci_lo, ci_hi = np.percentile(v, [2.5, 97.5])
-
-        top = ax.get_ylim()[1]
-        ax.axvspan(mean - se, mean + se, color=se_c, alpha=0.15, zorder=0)
-        ax.vlines([mean - se, mean + se], 0, top, colors=se_c, linestyles='--', linewidth=2, label='mean ± SE')
-        ax.vlines(mean, 0, top, colors=mean_c, linestyles='--', linewidth=2, label='mean')
-        ax.vlines(mean + sb, 0, top, colors=sb_c, linewidth=2, label='mean + SB')
-        ax.vlines([ci_lo, ci_hi], 0, top, colors=ci_c, linestyles=':', linewidth=2.5, label='95% CI (percentile)')
-        ax.set_ylim(0, top)
-        text = (f"mean = {mean:.3f}\n"
-                f"SE = {se:.3f}\n"
-                f"SB = {sb:.3f}\n"
-                f"95% CI: ({ci_lo:.3f}, {ci_hi:.3f})")
-        ax.text(0.97, 0.95, text, ha='right', va='top', transform=ax.transAxes,
-                bbox=self._info_box(is_best))
-        ax.legend(loc='upper left')
-        fig.tight_layout()
-
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
-        fig.savefig(Path(out_dir) / f"{metric.lower().replace(' ', '_')}_{model_type}_{t}_{phases}.png", dpi=150)
-
     def _show_booklet(self, pages: list[tuple[str, Figure]], booklet_title: str) -> None:
         # One scrollable window with Prev/Next buttons (or Left/Right arrow keys) to flip pages.
         # Blocks until the window is closed.
@@ -435,9 +385,6 @@ class PlotStuff:
 
     # estimator names the statistic used (e.g. 'mean', 'median'); it goes into the
     # booklet title and the PNG filenames, e.g. bootstrap_mean_estimates_posner_phases.png
-    def plot_diffs(self, mean_diff_data: tuple[pd.DataFrame], estimator: str = 'mean')-> None:
-        self._plot_metric_histograms(mean_diff_data, booklet_title=f'Bootstrap {estimator} diffs', centered=True)
-
     def plot_mean_estimates(self, mean_estimate_data: tuple[pd.DataFrame], estimator: str = 'mean')-> None:
         self._plot_metric_histograms(mean_estimate_data, booklet_title=f'Bootstrap {estimator} estimates', centered=False)
 
@@ -1090,51 +1037,6 @@ class PlotStuff:
         in_event = df['time'].isin(event_times).to_numpy().astype(np.int8)
         edges = np.flatnonzero(np.diff(np.concatenate([[0], in_event, [0]])))
         return [(dates.iloc[a], dates.iloc[min(b, len(df) - 1)]) for a, b in zip(edges[::2], edges[1::2])]
-
-    @matplotlib.rc_context(PAPER_RC)
-    def plot_bootstrap_stack(self, data_folder: str = 'data', bootstraps: tuple[int, ...] = (1,),
-                             out_dir: str = r'C:\Users\Lewis\Documents\SWLG-Paper\figs\evaluation'
-                                            r'\time_intensity_profile\learning_and_evaluation_procedures\equations'
-                             ) -> None:
-        # The original series (data_0) on top, the given bootstrap datasets underneath: one panel each with
-        # electron low, electron high and proton overlaid, same y-scale, events shaded, ln(10) line.
-        # Every row is plotted at data_0's start + 5 min x row (as in plot_bootstrap_series) so the
-        # panels line up row for row. Saved as <out_dir>/bootstrap_stack.png
-        channels = self._flux_channels()
-        cols = ['time', *channels]
-        original = pd.read_csv(f'{data_folder}/data_0.csv', usecols=cols)
-        dates = pd.Series(pd.to_datetime(original['time'].iloc[0]) + pd.Timedelta(minutes=5) * np.arange(len(original)))
-        event_times = set()
-        for s, e in self._event_rows(data_folder):
-            event_times.update(original['time'].iloc[s:e])
-        limits = self._flux_limits(original)
-
-        datasets = [('Original', original)] + \
-                   [(f'Bootstrap {k}', pd.read_csv(f'{data_folder}/data_{k}.csv', usecols=cols))
-                    for k in bootstraps]
-        y_range = (min(low for low, _ in limits.values()), max(high for _, high in limits.values()))
-        fig = Figure(figsize=(12, 3 * len(datasets) + 0.6))
-        axes = fig.subplots(len(datasets), 1, sharex=True)
-        for ax, (name, df) in zip(axes, datasets):
-            for start, end in self._bootstrap_spans(df, event_times, dates):
-                ax.axvspan(start, end, color=self.sep_c, alpha=0.45, lw=0)
-            for col, (label, colour) in channels.items():   # proton last, so it is drawn on top
-                ax.plot(dates.iloc[:len(df)], df[col].to_numpy(), color=colour, lw=0.4, rasterized=True)
-            ax.axhline(np.log(10), color='#0b0b0b', ls='--', lw=0.8)
-            ax.set_ylim(*y_range)
-            ax.set_ylabel('ln(flux)')
-            ax.set_title(name, loc='left')
-            ax.grid(axis='y', color='#e1e0d9', lw=0.5)
-            for side in ('top', 'right'):
-                ax.spines[side].set_visible(False)
-        handles = [Line2D([], [], color=colour, lw=1.5, label=label) for label, colour in channels.values()] + \
-                  [Line2D([], [], color=self.sep_c, alpha=0.45, lw=8, label='SEP events'),
-                   Line2D([], [], color='#0b0b0b', ls='--', lw=0.8, label='ln(10) = 10 pfu')]
-        fig.legend(handles=handles, loc='upper center', ncol=3, frameon=False)
-        axes[-1].set_xlabel('Date (data_0 start + 5 min per row)')
-        fig.tight_layout(rect=(0, 0, 1, 0.97))
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
-        fig.savefig(Path(out_dir) / 'bootstrap_stack.png', dpi=150)
 
     # ---------- MAE / MSE comparison: box plots of the per-dataset values, bars of the bootstrap means ----------
 

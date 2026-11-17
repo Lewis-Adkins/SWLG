@@ -8,16 +8,15 @@ model:
   window_size: 25          
 
 training:
-  train_new_models : True          
   n_seeds: 10                
   models_in_parallel: 10      
   n_datasets: 10              
   learning_rate: 0.001
   n_epochs: 1000
   batch_size: 32
-  num_workers: 8
   patience: 20             
   min_delta: 0.0001
+  full_cuda_graph: True      # capture the whole training step in one CUDA graph (~5x faster at batch 32)
 
 evaluate:
   true_vs_pred: True
@@ -28,7 +27,6 @@ data:
   use_phases: False  
 
 admin:
-  python314_path: ""
   python312_path: ".venv/Scripts/python.exe"   # runs the AutoGluon models (tft, chronos2)   
   data_folder_path: "data"
   results_folder_path: "results"

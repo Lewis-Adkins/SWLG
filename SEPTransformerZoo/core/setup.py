@@ -4,7 +4,6 @@ import pandas as pd
 import sys
 import random
 import numpy as np
-import os
 
 from colorama import Fore, Style
 
@@ -106,21 +105,6 @@ class SetUp:
                         return ChampionModel(config=self.config, network_cls=obj)
                     return obj(config=self.config)
                 
-    def store_model_types(self)-> dict[str, str]:
-        model_types = {}
-        baselines = []
-        champions  =[] 
-        for name, obj in inspect.getmembers(sys.modules[__name__]):
-            if inspect.isclass(obj):
-                if obj.type == "baseline":
-                    baselines.append(name)
-                else:
-                    champions.append(name)
-
-        model_types["baseline"] = baselines
-        model_types["champion"] = champions
-        return model_types
-     
     def get_data(self)-> None:
         self.check_data_files()
         self.get_event_indices()
@@ -137,9 +121,6 @@ class SetUp:
         return self.seeds[bootstrap_number - 1]
     
 # https://www.askpython.com/python-modules/numpy/calculating-auto-covariance-numpy
-    def spectral_density_function(self, M: int | None = None) -> np.ndarray:
-        pass
-
     def get_autocovriance_of_fluxes(self, k: int) -> np.ndarray:
         # X: shape (3, N), one row per channel (proton, electron, electron_high). Returns gamma(k) per row, shape (3,)
         X = self.particle_data[['proton', 'electron', 'electron_high']].to_numpy(dtype=np.float64).T
@@ -226,8 +207,3 @@ class SetUp:
                 
 
         self.block_bootstrap_particle_data(data_path, missing_bootstraps)
-
-    def flux_correlation(self)-> None:
-        pass
-        
-        

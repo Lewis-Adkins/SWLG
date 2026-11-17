@@ -6,7 +6,7 @@
 
 ---
 
-# RQ1: Do attention based models provide accurate SEP forecast by minimizing error in flux magnitude and lag?
+# RQ1: Do Machine Learning Models forcast high energy proton flux more accurately than than baseline models
 
 Do deep-learning models (RoPE, Sin, Zero Transformers, AutoGluon TFT, Chronos-2) forecast >10 MeV proton flux 30 min (t+6) and 60 min (t+12) ahead more accurately with smaller time lag, than statistical baselines,  (linear regression, persistence) and or machine learning models (RNN, NN)?
 
@@ -55,7 +55,11 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 
 ---
 
-# RQ2: Given a Fixed Input Time Window of Measured SEP fluxes on SOHO, How Far Ahead Can an Attention Based Model Predict High Energy Protons $>10$ MeV In the Future?
+# RQ2: What is the maximum useful high energy proton forecast a machine learning model can produce given a fixed input window of SEP fluxes at L1
+
+What is the best we can do as a predicitn for a fixed time series input (windwo)
+
+<!-- How Far Ahead Can an Attention Based Model Predict High Energy Protons $>10$ MeV In the Future? -->
 
 For each event we want to forecast we give our model $2$ hours of particle data to predict the proton flux $30,60$ minutes ahead. what is the difference in forecasting skill between $30,60$ minutes? What if we also included $90,120,150$ ahead? Is this relationship linear? When does it start to resemble persistence?
 
@@ -65,7 +69,12 @@ For each event we want to forecast we give our model $2$ hours of particle data 
 
 ---
 
-# RQ3: How does a Forecast Score for High Energy Protons $>10$ MeV Change As we Increase SEP the context window temporal length of SEPs
+# RQ3:  What is the generalized behaviour of forecast models with increased context sizes
+
+
+[[Kazemnejad 2023]]
+[[]]
+ <!-- How does a Forecast Score for High Energy Protons $>10$ MeV Change As we Increase SEP the context window temporal length of SEPs -->
 
 The models so far has only ever used a time window of $2$ hours to predict $30,60$ minutes into tehe future. What if instead we allowed it to see $4,6,8,10$ hours into the past for the same $30,60$ minute prediction? 
 

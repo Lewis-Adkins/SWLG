@@ -17,6 +17,14 @@ def n_test_samples(n_rows: int, prediction_time: int, train_split: float) -> int
     return n_samples - int(train_split * n_samples)
 
 
+def test_targets(dataset, prediction_time: int, train_split: float) -> dict[str, float]:
+    # {timestamp: proton} of the test targets, the same ones BaselineModel.pair_input_output returns as targets_test:
+    # one target per t in range(24, n - prediction_time) at row t + prediction_time, test = the last (1 - split).
+    n_test = n_test_samples(len(dataset), prediction_time, train_split)
+    test_rows = dataset.iloc[len(dataset) - n_test:]
+    return dict(zip(test_rows['time'], test_rows['proton'].astype(float)))
+
+
 def find_test_events(test_times, events: list[list[str]]) -> dict[int, tuple[int, int, int]]:
     # Events whose onset and peak are both in the test targets, found by timestamp (event_indices.txt only
     # fits data_0; the bootstrap datasets move the events). {event line index: (onset, threshold, peak) row

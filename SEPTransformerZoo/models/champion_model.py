@@ -1,7 +1,5 @@
-import copy
 import inspect
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
@@ -10,10 +8,11 @@ import torch
 from colorama import Fore, Style
 from torch import nn
 
+from core.model_run import ModelRun
 from lib.utils.gpu_batcher import GPUBatcher
 from models.baseline_model import BaselineModel
 
-MAX_TORCH_SEED = 2**64 - 1
+
 
 
 class ChampionModel(BaselineModel):
@@ -22,6 +21,7 @@ class ChampionModel(BaselineModel):
         self.network_cls = network_cls
         self.name        = network_cls.__name__.lower()
         self.type        = "champion"
+        self.MAX_TORCH_SEED = 2**64 - 1
         self.SKIPPING_TEXT = Fore.YELLOW + "[SKIPPING]" + Style.RESET_ALL
         self.TRAINING_TEXT = Fore.BLUE + "[TRAINING]" + Style.RESET_ALL
         self.device      = self.get_device()
@@ -35,16 +35,13 @@ class ChampionModel(BaselineModel):
         with open(f"{self.config['admin']['data_folder_path']}/seeds.txt", "r") as f:
             seeds = [int(seed) for seed in f.read().split()][:int(self.config["training"]["n_seeds"])]
 
-        too_large = [seed for seed in seeds if seed > MAX_TORCH_SEED]
+        too_large = [seed for seed in seeds if seed > self.MAX_TORCH_SEED]
         if too_large:
-            raise ValueError(f"seeds.txt values must be <= {MAX_TORCH_SEED} for torch.manual_seed: {too_large}")
+            raise ValueError(f"seeds.txt values must be <= {self.MAX_TORCH_SEED} for torch.manual_seed: {too_large}")
         return seeds
 
     def configure_torch(self) -> None:
-        torch.set_float32_matmul_precision("high")
-        n_runs = (int(self.config["training"]["n_seeds"]) * int(self.config["training"]["n_datasets"])
-                  * len(self.config["data"]["prediction_time"]))
-        torch._dynamo.config.recompile_limit = n_runs + 16
+        ModelRun.configure_torch(self.config)
 
     def get_model_name(self, seed_index: int) -> str:
         return f"{self.name}-{seed_index:02d}"
@@ -97,106 +94,6 @@ class ChampionModel(BaselineModel):
         print(f"Parameters = {n_parameters}")
         return n_parameters
 
-    def stack_models(self, models: list[nn.Module]) -> tuple[nn.Module, dict, dict]:
-        base_model = copy.deepcopy(models[0]).to("meta")
-        base_model.train()
-
-        params, buffers = torch.func.stack_module_state(models)
-        params = {k: v.detach().clone().requires_grad_() for k, v in params.items()}
-        return base_model, params, buffers
-
-    def make_compute_losses(self, base_model: nn.Module, loss_fn: nn.Module) -> Callable:
-        def compute_loss(p: dict, b: dict, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            pred = torch.func.functional_call(base_model, (p, b), (x,)).squeeze(-1)
-            return loss_fn(pred, y)
-
-        compute_losses = torch.func.vmap(compute_loss, in_dims=(0, 0, None, None), randomness="different")
-        # dynamic=False: compute_loss is the same function for every model in a run, so after nn/rnn
-        # change shape (phases adds input features) torch.compile would switch to symbolic shapes,
-        # which crashes the transformers' vmapped Linear layers. Static shapes just recompile instead.
-        return torch.compile(compute_losses, mode="reduce-overhead", dynamic=False)
-
-    def clip_grad_norm_stacked(self, params: dict, n_models: int, max_norm: float = 1.0) -> None:
-        grads   = [p.grad for p in params.values() if p.grad is not None]
-        sq_sums = sum(g.reshape(n_models, -1).pow(2).sum(dim=1) for g in grads)
-        clip    = (max_norm / (sq_sums.sqrt() + 1e-6)).clamp(max=1.0)
-        for g in grads:
-            g.mul_(clip.view(n_models, *([1] * (g.dim() - 1))))
-
-    def train_epoch(self, compute_losses: Callable, params: dict, buffers: dict, optimizer: torch.optim.Optimizer,
-                    train_loader: GPUBatcher, n_models: int) -> torch.Tensor:
-        total_losses = torch.zeros(n_models, device=self.device)
-        for batch in train_loader:
-            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
-                losses = compute_losses(params, buffers, batch["Current_Flux_Data"], batch["Target_Proton_Data"])
-                optimizer.zero_grad(set_to_none=True)
-                losses.sum().backward()
-            self.clip_grad_norm_stacked(params, n_models)
-            optimizer.step()
-            total_losses += losses.detach()
-        return total_losses / len(train_loader)
-
-    def new_tracker(self, n_models: int) -> dict:
-        return {"best_losses": [float("inf")] * n_models, "patience": [0] * n_models,
-                "best_states": [None] * n_models, "active": [True] * n_models,
-                "train_times": [None] * n_models}
-
-    def update_tracker(self, tracker: dict, avg_losses: list[float], params: dict, model_names: list[str],
-                       epoch: int, start_time: datetime) -> None:
-        for i, loss in enumerate(avg_losses):
-            if not tracker["active"][i]:
-                continue
-            if tracker["best_losses"][i] - loss > self.config["training"]["min_delta"]:
-                tracker["best_losses"][i], tracker["patience"][i] = loss, 0
-                tracker["best_states"][i] = {k: v[i].detach().clone() for k, v in params.items()}
-            else:
-                tracker["patience"][i] += 1
-
-            if tracker["patience"][i] >= self.config["training"]["patience"]:
-                tracker["train_times"][i] = datetime.now() - start_time
-                tracker["active"][i] = False
-                print(f"{model_names[i]} converged at epoch {epoch + 1} after {tracker['train_times'][i]}")
-
-    def load_best_states(self, models: list[nn.Module], best_states: list[dict | None]) -> None:
-        with torch.no_grad():
-            for model, state in zip(models, best_states):
-                if state is None:
-                    continue
-                for name, param in model.named_parameters():
-                    param.copy_(state[name])
-
-    def train_models(self, models: list[nn.Module], model_names: list[str], train_loader: GPUBatcher,
-                     loss_fn: nn.Module) -> list[timedelta]:
-        n_models = len(models)
-        base_model, params, buffers = self.stack_models(models)
-        compute_losses = self.make_compute_losses(base_model, loss_fn)
-        optimizer = torch.optim.Adam(list(params.values()), lr=self.config["training"]["learning_rate"],
-                                     fused=self.device.type == "cuda")
-        tracker = self.new_tracker(n_models)
-
-        start_time = datetime.now()
-        for epoch in range(self.config["training"]["n_epochs"]):
-            if not any(tracker["active"]):
-                break
-            epoch_start = datetime.now()
-            avg_losses  = self.train_epoch(compute_losses, params, buffers, optimizer, train_loader, n_models).tolist()
-            epoch_time  = (datetime.now() - epoch_start).total_seconds()
-            self.update_tracker(tracker, avg_losses, params, model_names, epoch, start_time)
-
-            if (epoch + 1) % 10 == 0:
-                for model_name, loss, patience, active in zip(model_names, avg_losses, tracker["patience"], tracker["active"]):
-                    if active:
-                        print(f"\t{model_name} | epoch {epoch + 1}/{self.config['training']['n_epochs']} | "
-                              f"loss {loss:.4f} | epoch time {epoch_time:.1f}s | "
-                              f"patience {patience}/{self.config['training']['patience']}")
-
-        # models still active hit n_epochs without converging: they trained for the full run
-        total_time = datetime.now() - start_time
-        train_times = [t if t is not None else total_time for t in tracker["train_times"]]
-
-        self.load_best_states(models, tracker["best_states"])
-        return train_times
-
     def test_model(self, model: nn.Module, test_loader: GPUBatcher) -> np.ndarray:
         model.eval()
         compiled = torch.compile(model, mode="reduce-overhead", dynamic=False)
@@ -205,7 +102,8 @@ class ChampionModel(BaselineModel):
         return torch.cat(predictions).cpu().numpy()
 
     def evaluate_model(self, model: nn.Module, model_name: str, train_time: timedelta, test_loader: GPUBatcher,
-                       targets_test: dict, event_times: list, data: pd.DataFrame, path: str) -> np.ndarray:
+                       targets_test: dict, event_times: list, data: pd.DataFrame, path: str,
+                       epochs: int, wall_time: timedelta, n_models: int) -> np.ndarray:
         y_pred      = self.test_model(model, test_loader)
         predictions = dict(zip(targets_test.keys(), y_pred))
         model_path  = Path(path) / model_name
@@ -214,7 +112,8 @@ class ChampionModel(BaselineModel):
         print(f"======== Evaluating {model_name} ========")
         np.savetxt(f"{model_path}/predictions.txt", y_pred, fmt='%.7f')
         self.evaluate(targets_test, predictions, event_times, data, str(model_path), train_time)
-        self.record_parameters(model, str(model_path))
+        ModelRun.record_training(str(model_path), epochs, wall_time, n_models)
+        self.record_parameters(model, str(model_path))   # last line: marks the seed as complete
         return y_pred
 
     def get_models_path(self, path: str) -> Path:
@@ -239,17 +138,19 @@ class ChampionModel(BaselineModel):
         train, targets_train, test, targets_test = self.get_splits(data, prediction_time)
         event_times_test = self.test_events(event_times, targets_test)
 
+        trainer = ModelRun(model=self, config=self.config)   # training engine (core/model_run.py)
         all_predictions = []
         for seed_indices in seed_groups:
             models, model_names, train_loader, test_loader, loss_fn = self.set_up_models_train_test(
                 train, targets_train, test, targets_test, seed_indices)
 
             self.print_training(model_names, prediction_time, path)
-            train_times = self.train_models(models, model_names, train_loader, loss_fn)
+            train_times, epochs, wall_time = trainer.train_models(models, model_names, train_loader, loss_fn)
             for model, model_name in zip(models, model_names):
                 self.save_model(model, model_name, path)
 
-            for model, model_name, train_time in zip(models, model_names, train_times):
+            for model, model_name, train_time, n_epochs in zip(models, model_names, train_times, epochs):
                 all_predictions.append(self.evaluate_model(model, model_name, train_time, test_loader,
-                                                           targets_test, event_times_test, data, path))
+                                                           targets_test, event_times_test, data, path,
+                                                           n_epochs, wall_time, len(models)))
         return all_predictions

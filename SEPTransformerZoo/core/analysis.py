@@ -723,8 +723,8 @@ def run_bootstrap(a: Analysis, bootstrap_data: tuple[pd.DataFrame]) -> tuple[pd.
     diffs = a.get_bootstrap_mean_diffs(mean_estimates, mean_of_bootstrap_estimates)
 
     std_err = a.get_bootstrap_standard_error(diffs)
-    # a.get_bootstrap_standard_bias(diffs)
-    # a.get_bootstrap_confidence_intervals(mean_estimates)
+    a.get_bootstrap_standard_bias(diffs)
+    a.get_bootstrap_confidence_intervals(mean_estimates)
 
     # Median counterparts: median of the bootstrap estimates and each estimate's distance from it
     median_of_bootstrap_estimates = a.get_median_bootstrap_estimates(mean_estimates)
@@ -805,7 +805,7 @@ def load_mean_estimates(a: Analysis) -> tuple[pd.DataFrame]:
 
 
 # ---------- F1 per alerting approach (Torres's W / EW / EAW / AW) ----------
-# Port of lib/torres/legacy/time_series_classification.py, but on each dataset's own test targets (row positions
+# Port of Torres's time_series_classification.py (legacy code, since removed), but on each dataset's own test targets (row positions
 # within the test set, events found by timestamp) instead of data_0's absolute rows, so it works for every
 # bootstrap dataset. An alert starts when the prediction reaches ln(10) and ends alert_window steps after the
 # last prediction above it. The approaches differ in two switches:
