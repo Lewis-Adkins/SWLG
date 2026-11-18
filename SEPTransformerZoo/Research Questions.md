@@ -39,8 +39,8 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 
 ## RQ1 Figures
 
-**Preliminary: all models are 1-epoch runs and are not accucrate to comparing with torres and persistence**
----
+
+
 **Scorecard.** Mean score of each model on each metric over the 10 bootstrap datasets, at 30 and 60 minutes ahead. Cell colour shows the effect size against persistence (Cohen's *d*; blue = better, orange = worse).
 
 ![RQ1 heatmap](results/metrics_analysis/rq1/rq1_heatmap_nophases.png)
@@ -55,8 +55,8 @@ Each null hypothesis says the champion ($c$) is no better than the baseline ($b$
 
 ---
 
-# RQ2: What is the maximum useful high energy proton forecast a machine learning model can produce given a fixed input window of SEP fluxes at L1
-
+# RQ2: What is the maximum time in the future SEP models can predict high energy proton fluxes
+**Alt: given a fixed input time window of measured SEP fluxes on SOHO, how far can forecast models predict high energy ptoons $>10$ MeV into the future
 What is the best we can do as a predicitn for a fixed time series input (windwo)
 
 <!-- How Far Ahead Can an Attention Based Model Predict High Energy Protons $>10$ MeV In the Future? -->
@@ -69,9 +69,11 @@ For each event we want to forecast we give our model $2$ hours of particle data 
 
 ---
 
-# RQ3:  What is the generalized behaviour of forecast models with increased context sizes
+# RQ3:  What is the influence on high energy proton predictions from "length generalization"
+length generalization coined by kazemnejad 2023.
 
-
+alt: what is the influence on high energy proton predictions with increased SEP context window.
+alt2: How does a forecast score for high energy protons $>10$ MeV change as we increase the context window temporal length of SEPs
 [[Kazemnejad 2023]]
 [[]]
  <!-- How does a Forecast Score for High Energy Protons $>10$ MeV Change As we Increase SEP the context window temporal length of SEPs -->
@@ -85,7 +87,8 @@ It has been proposed that a transformer architecture does not struggle with long
 
 ---
 
-# RQ4: For a hyperparameterization search of ML and attention models, what is the best configuration for SEP forecasting
+# RQ4: What is the behavoir on SEP forecast models as we scale models up.
+alt: for a hyperparameterization search of ML and Attention models, what configuration maximizes forecast skill score?
 
 How sensitive is forecast skill to model size and training hyperparameters? Transformers has been proposed to scale far better than ML NN and RNN models.
 
